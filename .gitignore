@@ -1,0 +1,30 @@
+# Don't Starve mod build artifacts
+*.zip
+dist/
+build/
+
+# Local tooling and editor files
+.idea/
+.vscode/
+*.user
+*.suo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.pytest_cache/
+
+# Runtime captures and local state
+runtime/

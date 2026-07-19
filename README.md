@@ -1,0 +1,113 @@
+# Don't Starve AI Mod
+
+Give Chester a voice and enough context to talk about the current *Don't Starve Together* game.
+
+The first vertical slice follows the interaction design of
+[StardewAIChat](https://github.com/qimidandapigu/StardewAIChat): hold `V` to talk,
+release to send microphone audio, the current game screenshot, and structured game
+state to a multimodal model, then hear Chester's answer.
+
+## What works
+
+- Hold-to-talk microphone recording (`V` by default).
+- Capture of the visible *Don't Starve Together* window.
+- A Lua mod exports player, world, inventory, nearby-entity, and Chester state.
+- An OpenAI-compatible API performs vision chat; voice can use compatible audio
+  endpoints or the same Volcengine ASR/TTS backend as StardewAIChat.
+- The latest screenshot and merged context are saved under `runtime/` for debugging.
+- Chester displays the answer as an in-game speech bubble in locally hosted worlds.
+
+This version targets Windows and *Don't Starve Together*. The in-game reply bridge is
+intended for local/single-player hosting; voice and vision also work when joining a
+remote server, but the remote server cannot display Chester's reply bubble unless it
+also has access to the bridge file.
+
+## Quick start
+
+Requirements: Python 3.11+, *Don't Starve Together*, a vision chat endpoint, and either
+compatible audio endpoints or a Volcengine voice key.
+
+```powershell
+git clone https://github.com/qimidandapigu/dont-starve-ai-mod.git
+cd dont-starve-ai-mod
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+Copy-Item .env.example .env
+notepad .env
+```
+
+To reuse an existing local StardewAIChat setup without printing its keys:
+
+```powershell
+.\scripts\import-stardew-config.ps1
+```
+
+Install the Lua mod into the detected Steam game directory:
+
+```powershell
+.\scripts\install-mod.ps1
+```
+
+In DST, open **Mods**, enable **Don't Starve AI Mod**, and enter or host a world. Then
+start the sidecar:
+
+```powershell
+python -m dont_starve_ai_mod
+```
+
+Hold `V`, speak, and release. Press `Ctrl+C` in the terminal to stop.
+
+## Configuration
+
+Copy `.env.example` to `.env`. At minimum set `AI_API_KEY`. The defaults use the
+standard `/v1/audio/transcriptions`, `/v1/chat/completions`, and `/v1/audio/speech`
+routes. Override individual URLs for other compatible providers.
+
+Useful diagnostics:
+
+```powershell
+# Verify API configuration, game directory, microphone, and window discovery.
+python -m dont_starve_ai_mod --check
+
+# Capture only; does not call any API.
+python -m dont_starve_ai_mod --capture-once
+
+# Test vision/chat/TTS without using the microphone.
+python -m dont_starve_ai_mod --text "What should I do next?"
+```
+
+After a capture, inspect:
+
+- `runtime/latest_screenshot.png` — exact image sent to the vision model.
+- `runtime/latest_context.json` — structured game and window state.
+- `runtime/chester.log` — sidecar activity and errors (secrets are never logged).
+
+## Architecture
+
+```text
+DST Lua mod ──writes──> data/unsafedata/dont_starve_ai_mod_state.json
+                                      │
+microphone ─┐                         v
+game window ├──> Python sidecar ──> ASR + vision chat + TTS ──> speakers
+            │                         │
+            └─────────────────────────┴──writes reply──> Chester speech bubble
+```
+
+The Lua sandbox is kept free of network and audio work. API keys stay only in the
+sidecar's local `.env` file, which is ignored by Git.
+
+## Development
+
+```powershell
+python -m unittest discover -s tests -v
+python -m compileall -q src tests
+```
+
+The sidecar uses a `src/` package layout. The game mod lives in `game-mod/` and can be
+copied repeatedly with `scripts/install-mod.ps1` during development. If the package is
+not installed in editable mode, prefix development commands with `$env:PYTHONPATH='src'`.
+
+## License
+
+MIT
