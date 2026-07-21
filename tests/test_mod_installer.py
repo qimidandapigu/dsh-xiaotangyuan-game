@@ -1,0 +1,58 @@
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from dont_starve_ai_mod.mod_installer import (
+    enable_modoverride,
+    enable_modsettings,
+    install_player_launcher,
+)
+
+
+class ModInstallerTests(unittest.TestCase):
+    def test_enables_local_mod_only_once(self) -> None:
+        first = enable_modsettings("-- settings\n")
+        second = enable_modsettings(first)
+        self.assertIn('ForceEnableMod("dont-starve-ai-mod")', first)
+        self.assertEqual(first, second)
+
+    def test_adds_world_override_without_replacing_existing_mods(self) -> None:
+        original = 'return {\n  ["workshop-1"]={ ["enabled"]=true }\n}'
+        updated = enable_modoverride(original)
+        self.assertIn('["dont-starve-ai-mod"]', updated)
+        self.assertIn('["workshop-1"]', updated)
+        self.assertEqual(enable_modoverride(updated), updated)
+
+    def test_installs_launcher_into_detected_game_mod_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "download"
+            source.mkdir()
+            source_exe = source / "ChesterAI.exe"
+            source_exe.write_bytes(b"launcher")
+            (source / ".env").write_text("AI_API_KEY=test\n", encoding="utf-8")
+            game_dir = root / "Don't Starve Together"
+            settings = SimpleNamespace(game_dir=game_dir)
+
+            with (
+                patch.object(sys, "frozen", True, create=True),
+                patch.object(sys, "executable", str(source_exe)),
+                patch("dont_starve_ai_mod.mod_installer.ensure_game_mod", return_value=[]),
+            ):
+                destination, launch_option, _actions = install_player_launcher(settings)
+
+            self.assertEqual(destination, game_dir / "mods" / "dont-starve-ai-mod")
+            self.assertEqual((destination / "ChesterAI.exe").read_bytes(), b"launcher")
+            self.assertEqual((destination / ".env").read_text(encoding="utf-8"), "AI_API_KEY=test\n")
+            self.assertEqual(launch_option, f'"{destination / "ChesterAI.exe"}" %command%')
+            self.assertEqual(
+                (destination / "Steam启动项.txt").read_text(encoding="utf-8"),
+                f"{launch_option}\n",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

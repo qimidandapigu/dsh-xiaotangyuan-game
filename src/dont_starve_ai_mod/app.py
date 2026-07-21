@@ -8,6 +8,8 @@ import time
 import uuid
 from pathlib import Path
 
+import requests
+
 from .ai_client import AiClient
 from .audio import VoiceRecorder, play_wav
 from .config import Settings
@@ -20,7 +22,7 @@ LOGGER = logging.getLogger("chester")
 
 def write_reply(path: Path | None, text: str) -> None:
     if path is None:
-        LOGGER.warning("Reply path is unavailable; skipping in-game speech bubble")
+        LOGGER.warning("回复文件路径不可用，已跳过游戏内气泡显示")
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -50,7 +52,7 @@ class ChesterApp:
         self.settings.latest_screenshot.write_bytes(capture.png)
         save_context(self.settings.latest_context, context)
         LOGGER.info(
-            "Captured %sx%s game image; Lua state available=%s",
+            "已截取 %sx%s 游戏画面；Lua 状态可用=%s",
             capture.window["capture_size"]["width"],
             capture.window["capture_size"]["height"],
             game_state.get("available"),
@@ -59,14 +61,14 @@ class ChesterApp:
 
     def process_audio(self, wav: bytes) -> None:
         if not wav:
-            LOGGER.warning("No microphone audio was recorded")
+            LOGGER.warning("没有录到麦克风声音")
             return
         with self._busy:
             screenshot, context = self.capture_context()
-            LOGGER.info("Transcribing %.1f KiB of microphone audio", len(wav) / 1024)
+            LOGGER.info("正在识别 %.1f KiB 的麦克风录音", len(wav) / 1024)
             text = self.ai.transcribe(wav)
             if not text:
-                LOGGER.warning("Transcription was empty")
+                LOGGER.warning("没有识别出语音内容")
                 return
             self._answer(text, screenshot, context)
 
@@ -76,9 +78,14 @@ class ChesterApp:
             return self._answer(text, screenshot, context)
 
     def _answer(self, text: str, screenshot: bytes, context: dict[str, object]) -> str:
-        LOGGER.info("Player: %s", text)
+        LOGGER.info("玩家：%s", text)
+        LOGGER.info(
+            "正在等待 AI 回答（思考模式=%s，最长等待 %.0f 秒）……",
+            "开启" if self.settings.vision_thinking else "关闭",
+            self.settings.request_timeout_seconds,
+        )
         reply = self.ai.chat(text, screenshot, context)
-        LOGGER.info("Chester: %s", reply)
+        LOGGER.info("切斯特：%s", reply)
         write_reply(self.settings.reply_file, reply)
         wav = self.ai.synthesize(reply)
         play_wav(wav)
@@ -88,10 +95,10 @@ class ChesterApp:
         try:
             from pynput import keyboard
         except ImportError as exc:
-            raise RuntimeError("pynput is required for the hold-to-talk hotkey") from exc
+            raise RuntimeError("缺少按键监听组件 pynput") from exc
 
         key_name = self.settings.voice_key
-        LOGGER.info("Ready. Hold %s to talk to Chester; Ctrl+C exits.", key_name.upper())
+        LOGGER.info("准备就绪。在游戏中按住 %s 键和切斯特说话；按 Ctrl+C 退出。", key_name.upper())
 
         def is_voice_key(key: object) -> bool:
             return getattr(key, "char", "") is not None and getattr(key, "char", "").lower() == key_name
@@ -106,16 +113,16 @@ class ChesterApp:
                 return
             try:
                 self.recorder.start()
-                LOGGER.info("Listening...")
+                LOGGER.info("正在听……")
             except Exception:
-                LOGGER.exception("Could not start microphone recording")
+                LOGGER.exception("无法开始录音")
 
         def on_release(key: object) -> None:
             if not is_voice_key(key) or not self.recorder.is_recording:
                 return
             try:
                 wav = self.recorder.stop()
-                LOGGER.info("Voice key released; processing")
+                LOGGER.info("说话键已松开，正在处理……")
                 threading.Thread(
                     target=self._safe_process_audio,
                     args=(wav,),
@@ -123,7 +130,7 @@ class ChesterApp:
                     name="chester-turn",
                 ).start()
             except Exception:
-                LOGGER.exception("Could not stop microphone recording")
+                LOGGER.exception("无法停止录音")
 
         with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
             listener.join()
@@ -131,5 +138,9 @@ class ChesterApp:
     def _safe_process_audio(self, wav: bytes) -> None:
         try:
             self.process_audio(wav)
+        except requests.Timeout:
+            message = "AI 接口响应超时了，请再按 V 重试一次。"
+            LOGGER.error("%s 当前对话已经结束，程序没有死机。", message)
+            write_reply(self.settings.reply_file, message)
         except Exception:
-            LOGGER.exception("Chester conversation turn failed")
+            LOGGER.exception("本次切斯特对话处理失败")
