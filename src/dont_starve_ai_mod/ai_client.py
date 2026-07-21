@@ -73,10 +73,19 @@ class AiClient:
                 ],
             }
         )
+        payload: dict[str, Any] = {
+            "model": self.settings.chat_model,
+            "messages": messages,
+            "stream": False,
+        }
+        if self.settings.chat_model.lower().startswith("glm-4.5"):
+            payload["thinking"] = {
+                "type": "enabled" if self.settings.vision_thinking else "disabled"
+            }
         response = self.session.post(
             self.settings.chat_url,
             headers={**self._headers(), "Content-Type": "application/json"},
-            json={"model": self.settings.chat_model, "messages": messages, "stream": False},
+            json=payload,
             timeout=self.settings.request_timeout_seconds,
         )
         self._raise(response, "vision chat")

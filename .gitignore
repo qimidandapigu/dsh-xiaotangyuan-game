@@ -2,6 +2,7 @@
 *.zip
 dist/
 build/
+*.spec
 
 # Local tooling and editor files
 .idea/

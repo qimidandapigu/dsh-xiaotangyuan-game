@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,11 @@ def _env(name: str, default: str = "") -> str:
     if value is None or not value.strip():
         return default
     return value.strip()
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = _env(name, "true" if default else "false").lower()
+    return value in {"1", "true", "yes", "on", "enabled"}
 
 
 def parse_steam_library_paths(text: str) -> list[Path]:
@@ -97,6 +103,7 @@ class Settings:
     voice_key: str
     game_window_title: str
     screenshot_max_width: int
+    vision_thinking: bool
     request_timeout_seconds: float
     reply_language: str
     game_dir: Path | None
@@ -119,22 +126,27 @@ class Settings:
     def api_errors(self) -> list[str]:
         errors: list[str] = []
         if not self.api_key:
-            errors.append("AI_API_KEY is missing")
+            errors.append("缺少 AI_API_KEY")
         if not self.chat_model:
-            errors.append("CHAT_MODEL is missing")
+            errors.append("缺少 CHAT_MODEL")
         if self.voice_provider == "volcengine":
             if not self.volcengine_api_key:
-                errors.append("VOLCENGINE_API_KEY is missing")
+                errors.append("缺少 VOLCENGINE_API_KEY")
         else:
             if not self.transcription_model:
-                errors.append("TRANSCRIPTION_MODEL is missing")
+                errors.append("缺少 TRANSCRIPTION_MODEL")
             if not self.tts_model:
-                errors.append("TTS_MODEL is missing")
+                errors.append("缺少 TTS_MODEL")
         return errors
 
 
 def load_settings(project_root: Path | None = None) -> Settings:
-    root = (project_root or Path(__file__).resolve().parents[2]).resolve()
+    if project_root is not None:
+        root = project_root.resolve()
+    elif getattr(sys, "frozen", False):
+        root = Path(sys.executable).resolve().parent
+    else:
+        root = Path(__file__).resolve().parents[2]
     load_dotenv(root / ".env")
 
     base_url = _env("AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
@@ -173,8 +185,9 @@ def load_settings(project_root: Path | None = None) -> Settings:
         volcengine_tts_resource_id=_env("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-1.0"),
         voice_key=_env("VOICE_KEY", "v").lower(),
         game_window_title=_env("GAME_WINDOW_TITLE", GAME_FOLDER),
-        screenshot_max_width=max(320, int(_env("SCREENSHOT_MAX_WIDTH", "1280"))),
-        request_timeout_seconds=max(5.0, float(_env("REQUEST_TIMEOUT_SECONDS", "60"))),
+        screenshot_max_width=max(320, int(_env("SCREENSHOT_MAX_WIDTH", "512"))),
+        vision_thinking=_env_bool("VISION_THINKING", False),
+        request_timeout_seconds=max(5.0, float(_env("REQUEST_TIMEOUT_SECONDS", "30"))),
         reply_language=_env("REPLY_LANGUAGE", "Chinese"),
         game_dir=game_dir,
         state_file=state_file,

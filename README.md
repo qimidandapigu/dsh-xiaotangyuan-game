@@ -43,6 +43,42 @@ To reuse an existing local StardewAIChat setup without printing its keys:
 .\scripts\import-stardew-config.ps1
 ```
 
+To build the Windows launcher for development:
+
+```powershell
+.\scripts\build-launcher.ps1
+```
+
+To build the complete player ZIP without private credentials:
+
+```powershell
+.\scripts\build-player-package.ps1
+```
+
+For a private, trusted test group only, explicitly include the local `.env`:
+
+```powershell
+.\scripts\build-player-package.ps1 -IncludeLocalEnv
+```
+
+Send `dist/dont-starve-ai-mod-player.zip` to the player. The player extracts it
+and runs `安装切斯特AI.exe`; it detects their game and installs everything to:
+
+```text
+<their DST folder>\mods\dont-starve-ai-mod
+```
+
+The installer creates `Steam启动项.txt` in that folder. The player copies
+its single line into the Steam launch options for *Don't Starve Together*:
+
+```text
+"<their DST folder>\mods\dont-starve-ai-mod\ChesterAI.exe" %command%
+```
+
+Steam passes the original game command through `%command%`. `ChesterAI.exe`
+automatically installs/enables the Lua mod, starts the game, and keeps the voice
+bridge running until the game exits. No extra `--launch` flag is required.
+
 Install the Lua mod into the detected Steam game directory:
 
 ```powershell
