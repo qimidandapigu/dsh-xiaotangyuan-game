@@ -118,11 +118,13 @@ After a capture, inspect:
 - `runtime/latest_screenshot.png` — exact image sent to the vision model.
 - `runtime/latest_context.json` — structured game and window state.
 - `runtime/chester.log` — sidecar activity and errors (secrets are never logged).
+- `<DST>/data/unsafedata/dont_starve_ai_mod_lua.txt` — Lua bridge diagnostics,
+  including input handler installation and `V` key events.
 
 ## Architecture
 
 ```text
-DST Lua mod ──writes──> data/unsafedata/dont_starve_ai_mod_state.json
+DST Lua mod ──writes──> data/unsafedata/dont_starve_ai_mod_requests.json
                                       │
 microphone ─┐                         v
 game window ├──> Python sidecar ──> ASR + vision chat + TTS ──> speakers
@@ -130,8 +132,11 @@ game window ├──> Python sidecar ──> ASR + vision chat + TTS ──> sp
             └─────────────────────────┴──writes reply──> Chester speech bubble
 ```
 
-The Lua sandbox is kept free of network and audio work. API keys stay only in the
-sidecar's local `.env` file, which is ignored by Git.
+The Lua mod also refreshes `dont_starve_ai_mod_state.json` for diagnostics. Recording
+commands are stored as an event array in `dont_starve_ai_mod_requests.json`, and the
+Python sidecar consumes each event ID once. The Lua sandbox is kept free of network
+and audio work. API keys stay only in the sidecar's local `.env` file, which is ignored
+by Git.
 
 ## Development
 

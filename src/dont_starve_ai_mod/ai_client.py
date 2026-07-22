@@ -15,6 +15,19 @@ import requests
 from .config import Settings
 
 
+_SPEAKER_PREFIX = re.compile(r"^\s*(?:chester|切斯特)\s*[:：]\s*", re.IGNORECASE)
+
+
+def clean_reply(text: str) -> str:
+    """Keep only Chester's spoken words, not a model-supplied speaker label."""
+    reply = text.strip()
+    while True:
+        cleaned = _SPEAKER_PREFIX.sub("", reply, count=1).strip()
+        if cleaned == reply:
+            return reply
+        reply = cleaned
+
+
 def build_system_prompt(context: dict[str, Any], language: str) -> str:
     state_json = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
     return f"""You are Chester, the loyal walking chest from Don't Starve Together.
@@ -23,6 +36,7 @@ Use the screenshot and structured context to understand the current situation.
 Never claim you can see an object or game fact unless it is supported by the screenshot
 or context. If context is unavailable or stale, acknowledge uncertainty naturally.
 Keep the spoken answer concise: normally one to three sentences. Do not use markdown.
+Do not prefix the reply with a speaker label such as "Chester:" or "切斯特：".
 Reply in {language}.
 
 CURRENT_CONTEXT_JSON:
@@ -94,7 +108,7 @@ class AiClient:
             content = "".join(
                 str(part.get("text", "")) for part in content if isinstance(part, dict)
             )
-        reply = str(content).strip()
+        reply = clean_reply(str(content))
         self.history.append(("user", user_text))
         self.history.append(("assistant", reply))
         return reply

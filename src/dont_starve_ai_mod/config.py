@@ -16,6 +16,7 @@ except ImportError:  # Allows diagnostics to explain a partially installed envir
 GAME_FOLDER = "Don't Starve Together"
 STATE_FILENAME = "dont_starve_ai_mod_state.json"
 REPLY_FILENAME = "dont_starve_ai_mod_reply.json"
+REQUEST_FILENAME = "dont_starve_ai_mod_requests.json"
 
 
 def _env(name: str, default: str = "") -> str:
@@ -109,6 +110,7 @@ class Settings:
     game_dir: Path | None
     state_file: Path | None
     reply_file: Path | None
+    request_file: Path | None
     runtime_dir: Path
 
     @property
@@ -156,6 +158,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
     default_unsafedata = game_dir / "data" / "unsafedata" if game_dir else None
     configured_state = _env("DST_STATE_FILE")
     configured_reply = _env("DST_REPLY_FILE")
+    configured_request = _env("DST_REQUEST_FILE")
     state_file = (
         Path(configured_state).expanduser().resolve()
         if configured_state
@@ -165,6 +168,11 @@ def load_settings(project_root: Path | None = None) -> Settings:
         Path(configured_reply).expanduser().resolve()
         if configured_reply
         else (default_unsafedata / REPLY_FILENAME if default_unsafedata else None)
+    )
+    request_file = (
+        Path(configured_request).expanduser().resolve()
+        if configured_request
+        else (default_unsafedata / REQUEST_FILENAME if default_unsafedata else None)
     )
 
     runtime_dir = root / "runtime"
@@ -192,5 +200,6 @@ def load_settings(project_root: Path | None = None) -> Settings:
         game_dir=game_dir,
         state_file=state_file,
         reply_file=reply_file,
+        request_file=request_file,
         runtime_dir=runtime_dir,
     )

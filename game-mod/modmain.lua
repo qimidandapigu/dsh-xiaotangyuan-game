@@ -10,9 +10,32 @@ local tostring = GLOBAL.tostring
 local type = GLOBAL.type
 
 local STATE_PATH = "unsafedata/dont_starve_ai_mod_state.json"
+local REQUEST_PATH = "unsafedata/dont_starve_ai_mod_requests.json"
 local REPLY_PATH = "unsafedata/dont_starve_ai_mod_reply.json"
-local STATE_VERSION = 1
+-- DST only permits writes to selected extensions in unsafedata.  Keeping this
+-- as .txt is important: a .log file silently fails to open and hides exactly
+-- the diagnostics needed when the input bridge does not start.
+local LUA_LOG_PATH = "unsafedata/dont_starve_ai_mod_lua.txt"
+local RPC_NAMESPACE = "dont_starve_ai_mod"
+local STATE_VERSION = 2
+local VOICE_KEY = GLOBAL.KEY_V or 118
+
 local last_reply_id = ""
+local voice_key_down = false
+local key_handlers_installed = false
+local request_sequence = 0
+
+local function diagnostic(message)
+    local timestamp = GLOBAL.os ~= nil and GLOBAL.os.time ~= nil and GLOBAL.os.time() or 0
+    local text = tostring(message)
+    print("[Chester AI] " .. text)
+
+    local file = io.open(LUA_LOG_PATH, "a")
+    if file ~= nil then
+        file:write("[" .. tostring(timestamp) .. "] " .. text .. "\n")
+        file:close()
+    end
+end
 
 local function round(value, places)
     if type(value) ~= "number" then
@@ -22,12 +45,15 @@ local function round(value, places)
     return math.floor(value * scale + 0.5) / scale
 end
 
-local function get_replica_value(player, name, method)
-    local component = player ~= nil and player.replica ~= nil and player.replica[name] or nil
-    if component == nil or component[method] == nil then
+local function get_replica_value(entity, component_name, method_name)
+    local component = entity ~= nil
+        and entity.replica ~= nil
+        and entity.replica[component_name]
+        or nil
+    if component == nil or component[method_name] == nil then
         return nil
     end
-    local ok, value = pcall(component[method], component)
+    local ok, value = pcall(component[method_name], component)
     return ok and value or nil
 end
 
@@ -61,7 +87,10 @@ end
 
 local function inventory_snapshot(player)
     local result = { items = {}, equipped = {}, active = nil }
-    local inventory = player ~= nil and player.replica ~= nil and player.replica.inventory or nil
+    local inventory = player ~= nil
+        and player.replica ~= nil
+        and player.replica.inventory
+        or nil
     if inventory == nil then
         return result
     end
@@ -94,27 +123,51 @@ local function inventory_snapshot(player)
     return result
 end
 
-local function chester_snapshot(player, player_x, player_y, player_z)
-    local result = { present = false }
+local function find_chester_near_position(x, y, z)
     if GLOBAL.TheSim == nil then
-        return result
+        return nil
     end
-
     local ok, entities = pcall(
         GLOBAL.TheSim.FindEntities,
         GLOBAL.TheSim,
-        player_x,
-        player_y,
-        player_z,
+        x,
+        y,
+        z,
         80,
         { "chester" },
         { "INLIMBO" }
     )
     if not ok or type(entities) ~= "table" or #entities == 0 then
+        return nil
+    end
+    return entities[1]
+end
+
+local function find_chester_near_player(player)
+    if player == nil or player.Transform == nil then
+        return nil
+    end
+    local x, y, z = player.Transform:GetWorldPosition()
+    return find_chester_near_position(x, y, z)
+end
+
+local function find_chester_near_any_player()
+    for _, player in pairs(GLOBAL.AllPlayers or {}) do
+        local chester = find_chester_near_player(player)
+        if chester ~= nil then
+            return chester
+        end
+    end
+    return nil
+end
+
+local function chester_snapshot(player_x, player_y, player_z)
+    local result = { present = false }
+    local chester = find_chester_near_position(player_x, player_y, player_z)
+    if chester == nil or chester.Transform == nil then
         return result
     end
 
-    local chester = entities[1]
     local x, y, z = chester.Transform:GetWorldPosition()
     local dx = x - player_x
     local dz = z - player_z
@@ -129,9 +182,9 @@ local function chester_snapshot(player, player_x, player_y, player_z)
 
     local container = chester.replica ~= nil and chester.replica.container or nil
     if container ~= nil and container.GetNumSlots ~= nil then
-        local occupied = 0
         local ok_slots, slots = pcall(container.GetNumSlots, container)
-        if ok_slots then
+        if ok_slots and type(slots) == "number" then
+            local occupied = 0
             result.container_slots = slots
             for slot = 1, slots do
                 local ok_item, item = pcall(container.GetItemInSlot, container, slot)
@@ -145,11 +198,12 @@ local function chester_snapshot(player, player_x, player_y, player_z)
     return result
 end
 
-local function nearby_snapshot(player, x, y, z)
+local function nearby_snapshot(x, y, z)
     local nearby = {}
     if GLOBAL.TheSim == nil then
         return nearby
     end
+
     local ok, entities = pcall(
         GLOBAL.TheSim.FindEntities,
         GLOBAL.TheSim,
@@ -168,7 +222,7 @@ local function nearby_snapshot(player, x, y, z)
         if #nearby >= 30 then
             break
         end
-        if entity ~= nil and entity.prefab ~= nil then
+        if entity ~= nil and entity.prefab ~= nil and entity.Transform ~= nil then
             local ex, _, ez = entity.Transform:GetWorldPosition()
             local dx = ex - x
             local dz = ez - z
@@ -178,7 +232,9 @@ local function nearby_snapshot(player, x, y, z)
             })
         end
     end
-    table.sort(nearby, function(a, b) return a.distance < b.distance end)
+    table.sort(nearby, function(a, b)
+        return a.distance < b.distance
+    end)
     return nearby
 end
 
@@ -191,7 +247,6 @@ local function build_state()
 
     local x, y, z = player.Transform:GetWorldPosition()
     local world_state = world.state or {}
-    local temperature = get_replica_value(player, "temperature", "GetCurrent")
     local player_name = player.name
     if (player_name == nil or player_name == "") and player.GetDisplayName ~= nil then
         local ok, value = pcall(player.GetDisplayName, player)
@@ -211,8 +266,11 @@ local function build_state()
             health_percent = round(get_replica_value(player, "health", "GetPercent"), 3),
             hunger_percent = round(get_replica_value(player, "hunger", "GetPercent"), 3),
             sanity_percent = round(get_replica_value(player, "sanity", "GetPercent"), 3),
-            moisture_percent = round(get_replica_value(player, "moisture", "GetMoisturePercent"), 3),
-            temperature = round(temperature, 1),
+            moisture_percent = round(
+                get_replica_value(player, "moisture", "GetMoisturePercent"),
+                3
+            ),
+            temperature = round(get_replica_value(player, "temperature", "GetCurrent"), 1),
             inventory = inventory_snapshot(player),
         },
         world = {
@@ -226,23 +284,37 @@ local function build_state()
             is_snowing = world_state.issnowing,
             temperature = round(world_state.temperature, 1),
         },
-        chester = chester_snapshot(player, x, y, z),
-        nearby = nearby_snapshot(player, x, y, z),
+        chester = chester_snapshot(x, y, z),
+        nearby = nearby_snapshot(x, y, z),
     }
 end
 
-local function write_json(path, value)
-    local ok_encode, encoded = pcall(json.encode_compliant, value)
-    if not ok_encode or encoded == nil then
-        return false
+local function encode_json(value)
+    local ok, encoded = pcall(json.encode_compliant, value)
+    if not ok or encoded == nil then
+        return nil, tostring(encoded)
     end
+    return encoded, nil
+end
+
+local function write_json(path, value)
+    local encoded, encode_error = encode_json(value)
+    if encoded == nil then
+        return false, "JSON encode failed: " .. tostring(encode_error)
+    end
+
     local file = io.open(path, "w")
     if file == nil then
-        return false
+        return false, "io.open failed: " .. path
     end
-    file:write(encoded)
+    local ok, write_error = pcall(function()
+        file:write(encoded)
+    end)
     file:close()
-    return true
+    if not ok then
+        return false, "write failed: " .. tostring(write_error)
+    end
+    return true, nil
 end
 
 local function read_json(path)
@@ -266,17 +338,152 @@ local function write_state()
     end
 end
 
-local function find_chester_near_players()
-    for _, player in pairs(GLOBAL.AllPlayers or {}) do
-        if player ~= nil and player.Transform ~= nil then
-            local x, y, z = player.Transform:GetWorldPosition()
-            local entities = GLOBAL.TheSim:FindEntities(x, y, z, 80, { "chester" }, { "INLIMBO" })
-            if entities ~= nil and #entities > 0 then
-                return entities[1]
-            end
-        end
+local function write_recording_request(action)
+    request_sequence = request_sequence + 1
+    local timestamp = GLOBAL.os ~= nil and GLOBAL.os.time ~= nil and GLOBAL.os.time() or 0
+    local event = {
+        id = tostring(timestamp) .. "-" .. tostring(request_sequence),
+        action = action,
+        created_at_unix = timestamp,
+        game_time_seconds = round(GLOBAL.GetTime(), 2),
+        state = build_state(),
+    }
+
+    local document = read_json(REQUEST_PATH)
+    if type(document) ~= "table" or type(document.events) ~= "table" then
+        document = { schema_version = 1, events = {} }
     end
-    return nil
+    table.insert(document.events, event)
+    while #document.events > 100 do
+        table.remove(document.events, 1)
+    end
+    return write_json(REQUEST_PATH, document)
+end
+
+local function ensure_request_document()
+    local document = read_json(REQUEST_PATH)
+    if type(document) == "table" and type(document.events) == "table" then
+        return true, nil
+    end
+    return write_json(REQUEST_PATH, { schema_version = 1, events = {} })
+end
+
+local function show_chester_status(player, status)
+    local chester = find_chester_near_player(player)
+    if chester == nil then
+        diagnostic("cannot show " .. status .. ": no Chester within 80 units")
+        return
+    end
+    if chester.components == nil or chester.components.talker == nil then
+        diagnostic("cannot show " .. status .. ": Chester talker component unavailable")
+        return
+    end
+
+    if status == "listening" then
+        chester.components.talker:Say("正在聆听……", 30, nil, true)
+    elseif status == "thinking" then
+        chester.components.talker:Say("我在思考……", 30, nil, true)
+    end
+    diagnostic("Chester status shown: " .. status)
+end
+
+AddModRPCHandler(RPC_NAMESPACE, "chester_status", function(player, status)
+    diagnostic(
+        "status RPC received: status=" .. tostring(status)
+            .. "; player=" .. tostring(player ~= nil and player.prefab or "nil")
+    )
+    if status == "listening" or status == "thinking" then
+        show_chester_status(player, status)
+    end
+end)
+
+local function send_status(status)
+    local rpc_namespace = MOD_RPC ~= nil and MOD_RPC[RPC_NAMESPACE] or nil
+    local rpc = rpc_namespace ~= nil and rpc_namespace["chester_status"] or nil
+    if rpc == nil then
+        diagnostic("status RPC unavailable for " .. status)
+        return
+    end
+
+    local ok, error_message = pcall(SendModRPCToServer, rpc, status)
+    if ok then
+        diagnostic("status RPC sent: " .. status)
+    else
+        diagnostic("status RPC failed: " .. tostring(error_message))
+    end
+end
+
+local function on_voice_key_down()
+    diagnostic(
+        "V key-down callback: already_down=" .. tostring(voice_key_down)
+            .. "; player=" .. tostring(GLOBAL.ThePlayer)
+    )
+    if voice_key_down or GLOBAL.ThePlayer == nil then
+        return
+    end
+
+    voice_key_down = true
+    local written, write_error = write_recording_request("start_recording")
+    diagnostic(
+        "start_recording request: written=" .. tostring(written)
+            .. "; error=" .. tostring(write_error)
+    )
+    send_status("listening")
+end
+
+local function on_voice_key_up()
+    diagnostic("V key-up callback: was_down=" .. tostring(voice_key_down))
+    if not voice_key_down then
+        return
+    end
+
+    voice_key_down = false
+    local written, write_error = write_recording_request("stop_recording")
+    diagnostic(
+        "stop_recording request: written=" .. tostring(written)
+            .. "; error=" .. tostring(write_error)
+    )
+    send_status("thinking")
+end
+
+local function install_voice_key_handlers()
+    if key_handlers_installed then
+        return true
+    end
+    if GLOBAL.TheInput == nil then
+        diagnostic("key handler install deferred: TheInput is nil")
+        return false
+    end
+    if GLOBAL.TheInput.AddKeyDownHandler == nil or GLOBAL.TheInput.AddKeyUpHandler == nil then
+        diagnostic("key handler install failed: input handler methods unavailable")
+        return false
+    end
+
+    diagnostic("installing V handlers: key=" .. tostring(VOICE_KEY))
+    local ok_down, down_error = pcall(
+        GLOBAL.TheInput.AddKeyDownHandler,
+        GLOBAL.TheInput,
+        VOICE_KEY,
+        on_voice_key_down
+    )
+    local ok_up, up_error = pcall(
+        GLOBAL.TheInput.AddKeyUpHandler,
+        GLOBAL.TheInput,
+        VOICE_KEY,
+        on_voice_key_up
+    )
+    if not ok_down or not ok_up then
+        diagnostic(
+            "key handler install failed: down=" .. tostring(down_error)
+                .. "; up=" .. tostring(up_error)
+        )
+        return false
+    end
+
+    key_handlers_installed = true
+    diagnostic("V key handlers installed successfully; down=" .. tostring(ok_down)
+        .. "; up=" .. tostring(ok_up))
+    return true
 end
 
 local function show_reply()
@@ -289,50 +496,76 @@ local function show_reply()
     end
     last_reply_id = reply.id
 
-    local chester = find_chester_near_players()
-    if chester ~= nil and chester.components ~= nil and chester.components.talker ~= nil then
-        chester.components.talker:Say(string.sub(reply.text, 1, 300), 6)
-    end
-end
-
-local function give_eyebone_if_missing(player)
-    if player == nil or player.components == nil or player.components.inventory == nil then
+    diagnostic("new Python reply: id=" .. reply.id .. "; length=" .. tostring(#reply.text))
+    local chester = find_chester_near_any_player()
+    if chester == nil then
+        diagnostic("cannot show Python reply: no Chester near a player")
         return
     end
-    local inventory = player.components.inventory
-    local existing = inventory:FindItem(function(item)
-        return item ~= nil and item.prefab == "chester_eyebone"
-    end)
-    if existing ~= nil then
+    if chester.components == nil or chester.components.talker == nil then
+        diagnostic("cannot show Python reply: Chester talker component unavailable")
         return
     end
-
-    local eyebone = GLOBAL.SpawnPrefab("chester_eyebone")
-    if eyebone ~= nil then
-        inventory:GiveItem(eyebone)
-        if player.components.talker ~= nil then
-            player.components.talker:Say("切斯特来找你了。")
-        end
-    end
+    chester.components.talker:Say(reply.text, 8, nil, true)
+    diagnostic("Python reply shown by Chester")
 end
 
-AddPlayerPostInit(function(inst)
-    if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
-        inst:DoTaskInTime(2, give_eyebone_if_missing)
-    end
+diagnostic("modmain loaded; schema=" .. tostring(STATE_VERSION) .. "; key=" .. tostring(VOICE_KEY))
+
+AddSimPostInit(function()
+    diagnostic(
+        "sim initialized: TheInput=" .. tostring(GLOBAL.TheInput)
+            .. "; dedicated=" .. tostring(GLOBAL.TheNet ~= nil and GLOBAL.TheNet:IsDedicated())
+    )
+    install_voice_key_handlers()
 end)
 
 AddPrefabPostInit("chester", function(inst)
-    if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim and inst.components.talker == nil then
+    -- Chester's vanilla prefab does not include talker.  The server component
+    -- broadcasts the speech, but every client also needs its own local talker
+    -- component to render the FollowText bubble (as ai_elf does before
+    -- SetPristine in its prefab).
+    if inst.components.talker == nil then
         inst:AddComponent("talker")
+        -- The default FollowText offset (-400) floats noticeably too high over
+        -- Chester's compact model. Screen-space Y is negative upwards.
+        inst.components.talker.offset = GLOBAL.Vector3(0, -250, 0)
+        diagnostic(
+            "talker component added to Chester; master="
+                .. tostring(GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim)
+        )
     end
 end)
 
 AddPrefabPostInit("world", function(inst)
-    if not GLOBAL.TheNet:IsDedicated() then
+    local dedicated = GLOBAL.TheNet ~= nil and GLOBAL.TheNet:IsDedicated()
+    local master = GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim
+    diagnostic("world initialized: master=" .. tostring(master) .. "; dedicated=" .. tostring(dedicated))
+
+    if not dedicated then
+        local request_ready, request_error = ensure_request_document()
+        diagnostic(
+            "request document ready=" .. tostring(request_ready)
+                .. "; error=" .. tostring(request_error)
+        )
         inst:DoPeriodicTask(1, write_state, 1)
+        inst:DoTaskInTime(1, function()
+            if install_voice_key_handlers() then
+                return
+            end
+
+            local retry_task = nil
+            retry_task = inst:DoPeriodicTask(2, function()
+                if install_voice_key_handlers() and retry_task ~= nil then
+                    diagnostic("deferred V handler installation succeeded")
+                    retry_task:Cancel()
+                    retry_task = nil
+                end
+            end, 2)
+        end)
     end
-    if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
+
+    if master then
         inst:DoPeriodicTask(0.5, show_reply, 0.5)
     end
 end)

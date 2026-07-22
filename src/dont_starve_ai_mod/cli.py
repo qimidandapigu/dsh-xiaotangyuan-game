@@ -39,6 +39,10 @@ def _check(settings: Settings) -> int:
     state = read_game_state(settings.state_file)
     print(f"Lua 状态：{'可用' if state.get('available') else state.get('reason')}")
     print(f"回复文件：{settings.reply_file or '未找到'}")
+    print(f"Mod 请求文件：{settings.request_file or '未找到'}")
+    lua_log = settings.request_file.parent / "dont_starve_ai_mod_lua.txt" if settings.request_file else None
+    print(f"Lua 诊断日志：{lua_log or '未找到'}")
+    print(f"Python 日志：{settings.log_file}")
     print(f"API Key：{'已配置' if settings.api_key else '缺失'}")
     print(f"聊天模型：{settings.chat_model}")
     print(f"语音服务：{settings.voice_provider}")
@@ -105,7 +109,7 @@ def _launch_game(app: ChesterApp, settings: Settings, command: list[str]) -> int
     logging.getLogger("chester").info("正在启动《饥荒联机版》：%s", executable)
     game = subprocess.Popen(command, cwd=executable.parent)
     voice_thread = threading.Thread(
-        target=app.run_hotkey_loop,
+        target=app.run_mod_request_loop,
         daemon=True,
         name="chester-voice-bridge",
     )
@@ -296,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             reply = app.process_text(args.text)
             print(f"切斯特：{reply}")
         else:
-            app.run_hotkey_loop()
+            app.run_mod_request_loop()
     except KeyboardInterrupt:
         print("\n已停止。")
     except Exception:

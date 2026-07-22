@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from dont_starve_ai_mod.ai_client import AiClient
+from dont_starve_ai_mod.ai_client import AiClient, clean_reply
 
 
 class FakeResponse:
@@ -22,6 +22,10 @@ class FakeSession:
 
 
 class AiClientTests(unittest.TestCase):
+    def test_removes_chester_speaker_prefix(self) -> None:
+        self.assertEqual(clean_reply("切斯特：你好，主人！"), "你好，主人！")
+        self.assertEqual(clean_reply("Chester: Hello!"), "Hello!")
+
     def test_disables_thinking_for_glm_45_vision(self) -> None:
         settings = SimpleNamespace(
             api_key="test",
