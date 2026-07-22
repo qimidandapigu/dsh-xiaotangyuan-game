@@ -7,6 +7,7 @@ local pcall = GLOBAL.pcall
 local string = GLOBAL.string
 local table = GLOBAL.table
 local tostring = GLOBAL.tostring
+local tonumber = GLOBAL.tonumber
 local type = GLOBAL.type
 
 local STATE_PATH = "unsafedata/dont_starve_ai_mod_state.json"
@@ -19,11 +20,62 @@ local LUA_LOG_PATH = "unsafedata/dont_starve_ai_mod_lua.txt"
 local RPC_NAMESPACE = "dont_starve_ai_mod"
 local STATE_VERSION = 2
 local VOICE_KEY = GLOBAL.KEY_V or 118
+local CHESTER_SLOT_COUNTS = { [9] = true, [18] = true, [27] = true, [36] = true }
+local CHESTER_SLOTS = tonumber(GetModConfigData("chester_slots")) or 9
+if not CHESTER_SLOT_COUNTS[CHESTER_SLOTS] then
+    CHESTER_SLOTS = 9
+end
 
 local last_reply_id = ""
 local voice_key_down = false
 local key_handlers_installed = false
 local request_sequence = 0
+
+local function configure_chester_container(slot_count)
+    local containers = GLOBAL.require("containers")
+    local slots = CHESTER_SLOT_COUNTS[slot_count] and slot_count or 9
+    local widget = containers.params.chester.widget
+    local columns = slots <= 9 and 3 or (slots <= 18 and 6 or 9)
+    local rows = math.ceil(slots / columns)
+    local spacing = 80
+
+    widget.slotpos = {}
+    for row = rows - 1, 0, -1 do
+        for column = 0, columns - 1 do
+            if #widget.slotpos >= slots then
+                break
+            end
+            table.insert(
+                widget.slotpos,
+                GLOBAL.Vector3(
+                    (column - (columns - 1) / 2) * spacing,
+                    (row - (rows - 1) / 2) * spacing,
+                    0
+                )
+            )
+        end
+    end
+    widget.pos = GLOBAL.Vector3(0, 200, 0)
+    widget.side_align_tip = math.max(160, columns * spacing / 2 + 40)
+    if slots > 9 then
+        -- There is no matching 9x3 Chester frame in the base game's UI
+        -- assets. Hide the fixed 3x3 frame so the expanded slot grid is
+        -- visually consistent instead of leaving a small frame in its centre.
+        widget.bganim_visualfn = function(anim)
+            anim:Hide()
+        end
+    else
+        widget.bganim_visualfn = function(anim)
+            anim:Show()
+        end
+    end
+    -- Clients initially load their local Mod options, which may not match a
+    -- hosted world's settings. Always allocate the maximum possible pool;
+    -- the actual UI size is synchronized per Chester below.
+    containers.MAXITEMSLOTS = math.max(containers.MAXITEMSLOTS or 0, 36)
+end
+
+configure_chester_container(CHESTER_SLOTS)
 
 local function diagnostic(message)
     local timestamp = GLOBAL.os ~= nil and GLOBAL.os.time ~= nil and GLOBAL.os.time() or 0
@@ -603,6 +655,34 @@ AddSimPostInit(function()
 end)
 
 AddPrefabPostInit("chester", function(inst)
+    inst._chester_ai_slots = GLOBAL.net_tinybyte(
+        inst.GUID,
+        "chester_ai_slots",
+        "chester_ai_slotsdirty"
+    )
+
+    if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
+        inst._chester_ai_slots:set(CHESTER_SLOTS)
+    else
+        local function synchronize_chester_container_ui(chester)
+            local slots = chester._chester_ai_slots:value()
+            if CHESTER_SLOT_COUNTS[slots] then
+                configure_chester_container(slots)
+                if chester.replica ~= nil and chester.replica.container ~= nil then
+                    chester.replica.container:WidgetSetup("chester")
+                end
+                diagnostic("Chester container UI synchronized: slots=" .. tostring(slots))
+            else
+                diagnostic("Chester container UI waiting for server slots; value=" .. tostring(slots))
+            end
+        end
+
+        inst:ListenForEvent("chester_ai_slotsdirty", synchronize_chester_container_ui)
+        -- Initial net values may arrive before the dirty listener is installed.
+        -- Read once more after the container classified replica is attached.
+        inst:DoTaskInTime(1, synchronize_chester_container_ui)
+    end
+
     -- Chester's vanilla prefab does not include talker.  The server component
     -- broadcasts the speech, but every client also needs its own local talker
     -- component to render the FollowText bubble (as ai_elf does before
@@ -619,6 +699,13 @@ AddPrefabPostInit("chester", function(inst)
     end
 
     if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
+        -- Chester is an AI companion, not a combat unit. Do not let hostile
+        -- creatures select it, and make it immune to any incidental damage.
+        inst:AddTag("notarget")
+        if inst.components.health ~= nil then
+            inst.components.health:SetInvincible(true)
+        end
+
         local old_on_save = inst.OnSave
         inst.OnSave = function(chester, data)
             if old_on_save ~= nil then
