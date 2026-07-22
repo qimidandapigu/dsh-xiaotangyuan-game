@@ -584,6 +584,14 @@ local function show_reply()
     diagnostic("Python reply shown by Chester")
 end
 
+local function ignore_reply_left_by_previous_session()
+    local reply = read_json(REPLY_PATH)
+    if type(reply) == "table" and type(reply.id) == "string" then
+        last_reply_id = reply.id
+        diagnostic("ignoring reply left by previous session: id=" .. reply.id)
+    end
+end
+
 diagnostic("modmain loaded; schema=" .. tostring(STATE_VERSION) .. "; key=" .. tostring(VOICE_KEY))
 
 AddSimPostInit(function()
@@ -667,6 +675,9 @@ AddPrefabPostInit("world", function(inst)
     end
 
     if master then
+        -- The reply bridge file survives game restarts. Mark its current value
+        -- as already handled so Chester only says replies generated this session.
+        ignore_reply_left_by_previous_session()
         inst:DoPeriodicTask(0.5, show_reply, 0.5)
     end
 end)
