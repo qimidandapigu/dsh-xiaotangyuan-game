@@ -151,6 +151,80 @@ local function find_chester_near_player(player)
     return find_chester_near_position(x, y, z)
 end
 
+local function find_or_create_player_chester(player)
+    if player == nil or player.Transform == nil or player.userid == nil then
+        return nil, false
+    end
+
+    local x, y, z = player.Transform:GetWorldPosition()
+    -- This runs only when a player enters. Search the whole playable world so
+    -- a Chester that was left behind is reclaimed instead of duplicating it.
+    local candidates = GLOBAL.TheSim:FindEntities(x, y, z, 10000, { "chester" }, { "INLIMBO" })
+    local fallback = nil
+    for _, candidate in pairs(candidates) do
+        local follower = candidate.components ~= nil and candidate.components.follower or nil
+        if candidate._chester_ai_owner_userid == player.userid
+            or (follower ~= nil and follower.leader == player) then
+            return candidate, false
+        end
+        if fallback == nil and candidate._chester_ai_owner_userid == nil then
+            fallback = candidate
+        end
+    end
+
+    if fallback ~= nil then
+        return fallback, false
+    end
+
+    local chester = GLOBAL.SpawnPrefab("chester")
+    if chester ~= nil and chester.Transform ~= nil then
+        chester.Transform:SetPosition(x, y, z)
+        return chester, true
+    end
+    return nil, false
+end
+
+local function remove_player_eyebones(player)
+    local inventory = player ~= nil and player.components ~= nil and player.components.inventory or nil
+    if inventory == nil then
+        return 0
+    end
+
+    local removed = 0
+    while true do
+        local eyebone = inventory:FindItem(function(item)
+            return item ~= nil and item.prefab == "chester_eyebone"
+        end)
+        if eyebone == nil then
+            break
+        end
+        inventory:RemoveItem(eyebone, true)
+        eyebone:Remove()
+        removed = removed + 1
+    end
+    return removed
+end
+
+local function ensure_player_chester(player)
+    if player == nil or player.components == nil then
+        return
+    end
+    local chester, created = find_or_create_player_chester(player)
+    if chester == nil or chester.components == nil or chester.components.follower == nil then
+        diagnostic("unable to assign Chester for player=" .. tostring(player.userid))
+        return
+    end
+
+    chester._chester_ai_owner_userid = player.userid
+    chester.components.follower:SetLeader(player)
+    local removed = remove_player_eyebones(player)
+    diagnostic(
+        "Chester assigned: player=" .. tostring(player.userid)
+            .. "; created=" .. tostring(created)
+            .. "; removed_eyebones=" .. tostring(removed)
+    )
+end
+
 local function find_chester_near_any_player()
     for _, player in pairs(GLOBAL.AllPlayers or {}) do
         local chester = find_chester_near_player(player)
@@ -535,6 +609,33 @@ AddPrefabPostInit("chester", function(inst)
                 .. tostring(GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim)
         )
     end
+
+    if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
+        local old_on_save = inst.OnSave
+        inst.OnSave = function(chester, data)
+            if old_on_save ~= nil then
+                old_on_save(chester, data)
+            end
+            data.chester_ai_owner_userid = chester._chester_ai_owner_userid
+        end
+
+        local old_on_load = inst.OnLoad
+        inst.OnLoad = function(chester, data)
+            if old_on_load ~= nil then
+                old_on_load(chester, data)
+            end
+            if data ~= nil then
+                chester._chester_ai_owner_userid = data.chester_ai_owner_userid
+            end
+        end
+    end
+end)
+
+AddPlayerPostInit(function(player)
+    if GLOBAL.TheWorld == nil or not GLOBAL.TheWorld.ismastersim then
+        return
+    end
+    player:DoTaskInTime(2, ensure_player_chester)
 end)
 
 AddPrefabPostInit("world", function(inst)
