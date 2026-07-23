@@ -122,6 +122,10 @@ class Settings:
         return self.runtime_dir / "latest_context.json"
 
     @property
+    def conversation_history_file(self) -> Path:
+        return self.runtime_dir / "conversation_history.json"
+
+    @property
     def log_file(self) -> Path:
         return self.runtime_dir / "chester.log"
 

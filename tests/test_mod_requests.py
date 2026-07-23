@@ -105,6 +105,38 @@ class ModRequestTests(unittest.TestCase):
             self.assertEqual(thread.call_args.kwargs["args"], (b"wav", state))
             thread.return_value.start.assert_called_once_with()
 
+    def test_persists_the_latest_conversation_turns(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            settings = SimpleNamespace(
+                request_file=root / "requests.json",
+                conversation_history_file=root / "conversation_history.json",
+            )
+            with patch("dont_starve_ai_mod.app.AiClient"):
+                app = ChesterApp(settings)
+
+            for index in range(12):
+                app._record_conversation_turn(f"question {index}", f"answer {index}")
+
+            payload = json.loads(settings.conversation_history_file.read_text(encoding="utf-8"))
+            self.assertEqual(len(payload["turns"]), 10)
+            self.assertEqual(payload["turns"][0]["user"], "question 2")
+            self.assertEqual(app._last_question, "question 11")
+
+    def test_retry_request_starts_a_background_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(Path(directory) / "requests.json")
+            app._last_question = "What should I do?"
+            app._safe_retry_last_question = Mock()
+            state = {"player": {"prefab": "wilson"}}
+
+            with patch("dont_starve_ai_mod.app.threading.Thread") as thread:
+                app._handle_mod_request({"id": "3", "action": "retry_last", "state": state})
+
+            self.assertEqual(thread.call_args.kwargs["args"], (state,))
+            self.assertEqual(thread.call_args.kwargs["name"], "chester-retry")
+            thread.return_value.start.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()

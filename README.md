@@ -92,7 +92,9 @@ start the sidecar:
 python -m dont_starve_ai_mod
 ```
 
-Hold `V`, speak, and release. Press `Ctrl+C` in the terminal to stop.
+Hold `V`, speak, and release. Press `Shift+V` to retry the most recently
+recognised question without recording again. Press `Ctrl+C` in the terminal to stop.
+The latest 10 question-and-answer pairs are saved in `runtime/conversation_history.json`.
 
 ## Configuration
 

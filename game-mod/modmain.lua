@@ -602,6 +602,20 @@ local function on_voice_key_down()
         return
     end
 
+    -- Shift+V retries the most recently recognised question without opening
+    -- the microphone, so it does not conflict with normal hold-V recording.
+    local shift_down = (GLOBAL.KEY_LSHIFT ~= nil and GLOBAL.TheInput:IsKeyDown(GLOBAL.KEY_LSHIFT))
+        or (GLOBAL.KEY_RSHIFT ~= nil and GLOBAL.TheInput:IsKeyDown(GLOBAL.KEY_RSHIFT))
+    if shift_down then
+        local written, write_error = write_recording_request("retry_last")
+        diagnostic(
+            "retry_last request: written=" .. tostring(written)
+                .. "; error=" .. tostring(write_error)
+        )
+        send_status("thinking")
+        return
+    end
+
     voice_key_down = true
     local written, write_error = write_recording_request("start_recording")
     diagnostic(

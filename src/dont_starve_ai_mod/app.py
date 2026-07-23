@@ -18,6 +18,7 @@ from .screen_capture import capture_game_window, is_game_foreground
 
 
 LOGGER = logging.getLogger("chester")
+HISTORY_LIMIT = 10
 
 
 def write_reply(path: Path | None, text: str) -> None:
@@ -43,6 +44,64 @@ class ChesterApp:
         self._busy = threading.Lock()
         self._seen_request_ids: set[str] = set()
         self._last_bridge_heartbeat = 0.0
+        self._conversation_history_file = getattr(settings, "conversation_history_file", None)
+        self._conversation_history = self._load_conversation_history()
+        self._last_question = self._latest_question()
+        self._restore_ai_history()
+
+    def _load_conversation_history(self) -> list[dict[str, object]]:
+        path = self._conversation_history_file
+        if not isinstance(path, Path):
+            return []
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return []
+        except (OSError, json.JSONDecodeError):
+            LOGGER.warning("Unable to read conversation history; starting empty", exc_info=True)
+            return []
+        turns = payload.get("turns") if isinstance(payload, dict) else None
+        if not isinstance(turns, list):
+            return []
+        return [
+            turn
+            for turn in turns[-HISTORY_LIMIT:]
+            if isinstance(turn, dict)
+            and isinstance(turn.get("user"), str)
+            and isinstance(turn.get("assistant"), str)
+        ]
+
+    def _latest_question(self) -> str | None:
+        if not self._conversation_history:
+            return None
+        question = self._conversation_history[-1].get("user")
+        return question if isinstance(question, str) and question.strip() else None
+
+    def _restore_ai_history(self) -> None:
+        history = getattr(self.ai, "history", None)
+        if history is None:
+            return
+        for turn in self._conversation_history[-6:]:
+            history.append(("user", turn["user"]))
+            history.append(("assistant", turn["assistant"]))
+
+    def _record_conversation_turn(self, question: str, reply: str) -> None:
+        self._last_question = question
+        self._conversation_history.append(
+            {"user": question, "assistant": reply, "created_at_unix": time.time()}
+        )
+        self._conversation_history = self._conversation_history[-HISTORY_LIMIT:]
+        path = self._conversation_history_file
+        if not isinstance(path, Path):
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"schema_version": 1, "turns": self._conversation_history}
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(temporary, path)
+        except OSError:
+            LOGGER.warning("Unable to save conversation history", exc_info=True)
 
     def capture_context(
         self,
@@ -108,11 +167,25 @@ class ChesterApp:
             self.settings.request_timeout_seconds,
         )
         reply = self.ai.chat(text, screenshot, context)
+        self._record_conversation_turn(text, reply)
         LOGGER.info("切斯特：%s", reply)
         write_reply(self.settings.reply_file, reply)
         wav = self.ai.synthesize(reply)
         play_wav(wav)
         return reply
+
+    def retry_last_question(
+        self,
+        request_state: dict[str, object] | None = None,
+    ) -> None:
+        question = self._last_question
+        if not question:
+            write_reply(self.settings.reply_file, "我还没有听到上一句话，先按住 V 和我说话吧。")
+            return
+        with self._busy:
+            screenshot, context = self.capture_context(request_state)
+            LOGGER.info("正在重试上一条问题：%s", question)
+            self._answer(question, screenshot, context)
 
     def run_mod_request_loop(self, poll_interval: float = 0.05) -> None:
         path = self.settings.request_file
@@ -223,8 +296,25 @@ class ChesterApp:
                 LOGGER.exception("录音启动失败")
             return
 
+        if action == "retry_last":
+            if self._busy.locked() or self.recorder.is_recording:
+                write_reply(self.settings.reply_file, "我还在处理上一句话，请稍等一下。")
+                return
+            state = request.get("state")
+            threading.Thread(
+                target=self._safe_retry_last_question,
+                args=(state if isinstance(state, dict) else None,),
+                daemon=True,
+                name="chester-retry",
+            ).start()
+            return
+
         if action != "stop_recording":
             LOGGER.warning("忽略未知 Mod 事件：%s", action)
+            write_reply(
+                self.settings.reply_file,
+                "我没有认出这个指令，请重启切斯特 AI 后再试一次。",
+            )
             return
         if not self.recorder.is_recording:
             LOGGER.warning("忽略停止录音事件：录音机当前没有录音")
@@ -300,4 +390,19 @@ class ChesterApp:
         except Exception:
             message = "我刚才走神了，请按住 V 再问一次。"
             LOGGER.exception("本次切斯特对话处理失败")
+            write_reply(self.settings.reply_file, message)
+
+    def _safe_retry_last_question(
+        self,
+        request_state: dict[str, object] | None = None,
+    ) -> None:
+        try:
+            self.retry_last_question(request_state)
+        except requests.Timeout:
+            message = "重新提问超时了，请稍后按 Shift+V 再试一次。"
+            LOGGER.error("%s", message)
+            write_reply(self.settings.reply_file, message)
+        except Exception:
+            message = "我没能重新回答上一句话，请稍后按 Shift+V 再试一次。"
+            LOGGER.exception("重试上一条问题失败")
             write_reply(self.settings.reply_file, message)
