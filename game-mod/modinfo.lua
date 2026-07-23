@@ -29,6 +29,28 @@ configuration_options = {
         },
         default = 9,
     },
+    {
+        name = "chester_light_enabled",
+        label = "切斯特发光",
+        hover = "让切斯特持续提供光源。更改后重启世界生效。",
+        options = {
+            choice("关闭", false),
+            choice("开启（默认）", true),
+        },
+        default = true,
+    },
+    {
+        name = "chester_light_radius",
+        label = "切斯特发光范围",
+        hover = "调整切斯特周围的照明半径。更改后重启世界生效。",
+        options = {
+            choice("小", 2),
+            choice("中（默认）", 3),
+            choice("大", 4),
+            choice("很大", 5),
+        },
+        default = 3,
+    },
 }
 
 icon_atlas = nil

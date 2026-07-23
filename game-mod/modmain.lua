@@ -25,6 +25,9 @@ local CHESTER_SLOTS = tonumber(GetModConfigData("chester_slots")) or 9
 if not CHESTER_SLOT_COUNTS[CHESTER_SLOTS] then
     CHESTER_SLOTS = 9
 end
+local CHESTER_LIGHT_ENABLED = GetModConfigData("chester_light_enabled") == true
+local CHESTER_LIGHT_RADIUS = tonumber(GetModConfigData("chester_light_radius")) or 3
+CHESTER_LIGHT_RADIUS = math.max(1, math.min(CHESTER_LIGHT_RADIUS, 5))
 
 local last_reply_id = ""
 local voice_key_down = false
@@ -76,6 +79,25 @@ local function configure_chester_container(slot_count)
 end
 
 configure_chester_container(CHESTER_SLOTS)
+
+local function configure_chester_light(inst)
+    if not CHESTER_LIGHT_ENABLED then
+        return
+    end
+
+    -- The light is added on both the server and each client.  Light rendering
+    -- is client-local, while doing this on the server also keeps hosted and
+    -- dedicated worlds consistent without needing another network variable.
+    if inst.Light == nil then
+        inst.entity:AddLight()
+    end
+    inst.Light:SetRadius(CHESTER_LIGHT_RADIUS)
+    inst.Light:SetIntensity(0.8)
+    inst.Light:SetFalloff(0.6)
+    inst.Light:SetColour(1, 0.88, 0.62)
+    inst.Light:Enable(true)
+    inst.Light:EnableClientModulation(true)
+end
 
 local function diagnostic(message)
     local timestamp = GLOBAL.os ~= nil and GLOBAL.os.time ~= nil and GLOBAL.os.time() or 0
@@ -655,6 +677,8 @@ AddSimPostInit(function()
 end)
 
 AddPrefabPostInit("chester", function(inst)
+    configure_chester_light(inst)
+
     inst._chester_ai_slots = GLOBAL.net_tinybyte(
         inst.GUID,
         "chester_ai_slots",
