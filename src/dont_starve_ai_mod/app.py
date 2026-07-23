@@ -50,6 +50,9 @@ class ChesterApp:
         self._busy = threading.Lock()
         self._seen_request_ids: set[str] = set()
         self._last_bridge_heartbeat = 0.0
+        self._last_bridge_status_write = 0.0
+        self._last_request_at_unix: float | None = None
+        self._last_request_action: str | None = None
         self._conversation_history_file = getattr(settings, "conversation_history_file", None)
         self._conversation_history = self._load_conversation_history()
         self._last_question = self._latest_question()
@@ -214,8 +217,13 @@ class ChesterApp:
         LOGGER.info("状态文件=%s；回复文件=%s", self.settings.state_file, self.settings.reply_file)
         self._ignore_existing_mod_requests(path)
         while True:
+            self._write_bridge_status()
             self._log_bridge_heartbeat(path)
             for request in self._read_mod_requests(path):
+                self._last_request_at_unix = time.time()
+                action = request.get("action")
+                self._last_request_action = action if isinstance(action, str) else None
+                self._write_bridge_status(force=True)
                 LOGGER.info(
                     "收到 Mod 事件：action=%s id=%s state=%s",
                     request.get("action"),
@@ -224,6 +232,41 @@ class ChesterApp:
                 )
                 self._handle_mod_request(request)
             time.sleep(poll_interval)
+
+    def _write_bridge_status(self, force: bool = False) -> None:
+        """Publish lightweight, secret-free bridge health for the in-game HUD."""
+        path = getattr(self.settings, "bridge_status_file", None)
+        if not isinstance(path, Path):
+            return
+        now_monotonic = time.monotonic()
+        if not force and now_monotonic - self._last_bridge_status_write < 1.0:
+            return
+        self._last_bridge_status_write = now_monotonic
+
+        last_reply_at_unix: float | None = None
+        reply_file = getattr(self.settings, "reply_file", None)
+        if isinstance(reply_file, Path):
+            try:
+                last_reply_at_unix = reply_file.stat().st_mtime
+            except OSError:
+                pass
+        payload = {
+            "schema_version": 1,
+            "heartbeat_at_unix": time.time(),
+            "last_request_at_unix": self._last_request_at_unix,
+            "last_request_action": self._last_request_action,
+            "last_reply_at_unix": last_reply_at_unix,
+            "chat_model": getattr(self.settings, "chat_model", "") or "unknown",
+            "busy": self._busy.locked(),
+            "recording": self.recorder.is_recording,
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(path.suffix + ".tmp")
+            temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            os.replace(temporary, path)
+        except OSError:
+            LOGGER.warning("Unable to write bridge status", exc_info=True)
 
     def _log_bridge_heartbeat(self, path: Path) -> None:
         now = time.monotonic()

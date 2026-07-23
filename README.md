@@ -140,6 +140,8 @@ Python sidecar consumes each event ID once. The Lua sandbox is kept free of netw
 and audio work. API keys stay only in the sidecar's local `.env` file, which is ignored
 by Git. For multiplayer requests, the event and generated reply carry the requesting
 player's `recipient_userid`, so only that player's assigned Chester displays the reply.
+The HUD also reads `dont_starve_ai_mod_bridge_status.json`, a secret-free heartbeat
+written by Python that shows bridge health, model, and recent request/reply activity.
 
 ## Development
 

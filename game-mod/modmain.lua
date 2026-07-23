@@ -13,6 +13,7 @@ local type = GLOBAL.type
 local STATE_PATH = "unsafedata/dont_starve_ai_mod_state.json"
 local REQUEST_PATH = "unsafedata/dont_starve_ai_mod_requests.json"
 local REPLY_PATH = "unsafedata/dont_starve_ai_mod_reply.json"
+local BRIDGE_STATUS_PATH = "unsafedata/dont_starve_ai_mod_bridge_status.json"
 -- DST only permits writes to selected extensions in unsafedata.  Keeping this
 -- as .txt is important: a .log file silently fails to open and hides exactly
 -- the diagnostics needed when the input bridge does not start.
@@ -29,10 +30,14 @@ local CHESTER_LIGHT_ENABLED = GetModConfigData("chester_light_enabled") == true
 local CHESTER_LIGHT_RADIUS = tonumber(GetModConfigData("chester_light_radius")) or 3
 CHESTER_LIGHT_RADIUS = math.max(1, math.min(CHESTER_LIGHT_RADIUS, 5))
 local CHESTER_RECALL_DISTANCE = 48
+local STATUS_PANEL_KEY = GLOBAL.KEY_F8 or 119
 
 local last_reply_id = ""
 local voice_key_down = false
 local key_handlers_installed = false
+local status_panel_key_down = false
+local status_panel_key_handlers_installed = false
+local status_panel_visible = false
 local request_sequence = 0
 
 local function configure_chester_container(slot_count)
@@ -778,6 +783,141 @@ local function ignore_reply_left_by_previous_session()
     end
 end
 
+local function format_status_age(timestamp, now)
+    if type(timestamp) ~= "number" then
+        return "从未"
+    end
+    local seconds = math.max(0, math.floor(now - timestamp))
+    if seconds < 2 then
+        return "刚刚"
+    elseif seconds < 60 then
+        return tostring(seconds) .. " 秒前"
+    elseif seconds < 3600 then
+        return tostring(math.floor(seconds / 60)) .. " 分钟前"
+    end
+    return tostring(math.floor(seconds / 3600)) .. " 小时前"
+end
+
+local function bridge_status_panel_text()
+    local status = read_json(BRIDGE_STATUS_PATH)
+    local now = GLOBAL.os ~= nil and GLOBAL.os.time ~= nil and GLOBAL.os.time() or 0
+    if type(status) ~= "table" or type(status.heartbeat_at_unix) ~= "number" then
+        return "AI 状态\nPython 桥接：离线\n尚未收到心跳；请启动 scripts\\start.ps1"
+    end
+
+    local heartbeat_age = math.max(0, now - status.heartbeat_at_unix)
+    local model = type(status.chat_model) == "string" and status.chat_model or "未知"
+    local online = heartbeat_age <= 5
+    local bridge_line = online
+        and "Python 桥接：在线"
+        or "Python 桥接：离线（最后心跳 " .. format_status_age(status.heartbeat_at_unix, now) .. "）"
+    local activity = "等待按 V"
+    if status.recording == true then
+        activity = "正在录音"
+    elseif status.busy == true then
+        activity = "正在处理"
+    end
+    return "AI 状态\n"
+        .. bridge_line
+        .. "\n状态：" .. activity
+        .. "\n模型：" .. model
+        .. "\n最近请求：" .. format_status_age(status.last_request_at_unix, now)
+        .. "\n最近回复：" .. format_status_age(status.last_reply_at_unix, now)
+end
+
+local function attach_bridge_status_panel(controls)
+    if controls == nil or controls.chester_ai_status_text ~= nil then
+        return controls ~= nil
+    end
+    local ok, Text = pcall(GLOBAL.require, "widgets/text")
+    if not ok or Text == nil then
+        diagnostic("AI status panel unavailable: cannot load widgets/text")
+        return false
+    end
+    local text = controls:AddChild(Text(GLOBAL.UIFONT, 26, ""))
+    controls.chester_ai_status_text = text
+    -- Position this just below the health/hunger/sanity cluster on the right.
+    text:SetPosition(445, 85, 0)
+    text:SetColour(0.85, 0.95, 1, 1)
+
+    local function refresh()
+        text:SetString(bridge_status_panel_text())
+    end
+    refresh()
+    if status_panel_visible then
+        text:Show()
+    else
+        text:Hide()
+    end
+    controls.inst:DoPeriodicTask(1, refresh, 1)
+    diagnostic("AI status panel attached to local HUD; default_hidden=true")
+    return true
+end
+
+local function toggle_bridge_status_panel()
+    local hud = GLOBAL.ThePlayer ~= nil and GLOBAL.ThePlayer.HUD or nil
+    local controls = hud ~= nil and hud.controls or nil
+    local text = controls ~= nil and controls.chester_ai_status_text or nil
+    if text == nil then
+        diagnostic("AI status panel toggle ignored: HUD panel is not ready")
+        return
+    end
+    status_panel_visible = not status_panel_visible
+    if status_panel_visible then
+        text:Show()
+    else
+        text:Hide()
+    end
+    diagnostic("AI status panel visible=" .. tostring(status_panel_visible))
+end
+
+local function install_bridge_status_toggle_handlers()
+    if status_panel_key_handlers_installed then
+        return true
+    end
+    if GLOBAL.TheInput == nil
+        or GLOBAL.TheInput.AddKeyDownHandler == nil
+        or GLOBAL.TheInput.AddKeyUpHandler == nil then
+        return false
+    end
+    local function ctrl_down()
+        return (GLOBAL.KEY_LCTRL ~= nil and GLOBAL.TheInput:IsKeyDown(GLOBAL.KEY_LCTRL))
+            or (GLOBAL.KEY_RCTRL ~= nil and GLOBAL.TheInput:IsKeyDown(GLOBAL.KEY_RCTRL))
+    end
+    local ok_down, down_error = pcall(
+        GLOBAL.TheInput.AddKeyDownHandler,
+        GLOBAL.TheInput,
+        STATUS_PANEL_KEY,
+        function()
+            if status_panel_key_down then
+                return
+            end
+            status_panel_key_down = true
+            if ctrl_down() then
+                toggle_bridge_status_panel()
+            end
+        end
+    )
+    local ok_up, up_error = pcall(
+        GLOBAL.TheInput.AddKeyUpHandler,
+        GLOBAL.TheInput,
+        STATUS_PANEL_KEY,
+        function()
+            status_panel_key_down = false
+        end
+    )
+    if not ok_down or not ok_up then
+        diagnostic(
+            "AI status panel hotkey installation failed: down=" .. tostring(down_error)
+                .. "; up=" .. tostring(up_error)
+        )
+        return false
+    end
+    status_panel_key_handlers_installed = true
+    diagnostic("AI status panel hotkey installed: Ctrl+F8")
+    return true
+end
+
 diagnostic("modmain loaded; schema=" .. tostring(STATE_VERSION) .. "; key=" .. tostring(VOICE_KEY))
 
 AddSimPostInit(function()
@@ -786,6 +926,9 @@ AddSimPostInit(function()
             .. "; dedicated=" .. tostring(GLOBAL.TheNet ~= nil and GLOBAL.TheNet:IsDedicated())
     )
     install_voice_key_handlers()
+    if GLOBAL.TheNet == nil or not GLOBAL.TheNet:IsDedicated() then
+        install_bridge_status_toggle_handlers()
+    end
 end)
 
 AddPrefabPostInit("chester", function(inst)
@@ -868,6 +1011,36 @@ end)
 
 AddPlayerPostInit(function(player)
     if GLOBAL.TheWorld == nil or not GLOBAL.TheWorld.ismastersim then
+        -- HUD controls are created after modmain has loaded on a client. Attach
+        -- the panel to the actual local player's HUD instead of relying on a
+        -- class post-construction hook that may already have been missed.
+        player:DoTaskInTime(2, function()
+            if GLOBAL.ThePlayer ~= player then
+                return
+            end
+            local attempts = 0
+            local panel_attached = false
+            local retry_task = nil
+            local function attach_when_ready()
+                attempts = attempts + 1
+                local hud = GLOBAL.ThePlayer ~= nil and GLOBAL.ThePlayer.HUD or nil
+                local controls = hud ~= nil and hud.controls or nil
+                panel_attached = attach_bridge_status_panel(controls)
+                if panel_attached or attempts >= 10 then
+                    if controls == nil then
+                        diagnostic("AI status panel unavailable: local HUD controls not ready")
+                    end
+                    if retry_task ~= nil then
+                        retry_task:Cancel()
+                        retry_task = nil
+                    end
+                end
+            end
+            attach_when_ready()
+            if not panel_attached then
+                retry_task = player:DoPeriodicTask(1, attach_when_ready, 1)
+            end
+        end)
         return
     end
     player:DoTaskInTime(2, function()

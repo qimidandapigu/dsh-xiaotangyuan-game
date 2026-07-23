@@ -17,6 +17,7 @@ GAME_FOLDER = "Don't Starve Together"
 STATE_FILENAME = "dont_starve_ai_mod_state.json"
 REPLY_FILENAME = "dont_starve_ai_mod_reply.json"
 REQUEST_FILENAME = "dont_starve_ai_mod_requests.json"
+BRIDGE_STATUS_FILENAME = "dont_starve_ai_mod_bridge_status.json"
 
 
 def _env(name: str, default: str = "") -> str:
@@ -111,6 +112,7 @@ class Settings:
     state_file: Path | None
     reply_file: Path | None
     request_file: Path | None
+    bridge_status_file: Path | None
     runtime_dir: Path
 
     @property
@@ -163,6 +165,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
     configured_state = _env("DST_STATE_FILE")
     configured_reply = _env("DST_REPLY_FILE")
     configured_request = _env("DST_REQUEST_FILE")
+    configured_bridge_status = _env("DST_BRIDGE_STATUS_FILE")
     state_file = (
         Path(configured_state).expanduser().resolve()
         if configured_state
@@ -177,6 +180,11 @@ def load_settings(project_root: Path | None = None) -> Settings:
         Path(configured_request).expanduser().resolve()
         if configured_request
         else (default_unsafedata / REQUEST_FILENAME if default_unsafedata else None)
+    )
+    bridge_status_file = (
+        Path(configured_bridge_status).expanduser().resolve()
+        if configured_bridge_status
+        else (default_unsafedata / BRIDGE_STATUS_FILENAME if default_unsafedata else None)
     )
 
     runtime_dir = root / "runtime"
@@ -205,5 +213,6 @@ def load_settings(project_root: Path | None = None) -> Settings:
         state_file=state_file,
         reply_file=reply_file,
         request_file=request_file,
+        bridge_status_file=bridge_status_file,
         runtime_dir=runtime_dir,
     )

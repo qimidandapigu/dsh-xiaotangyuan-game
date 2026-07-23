@@ -118,6 +118,24 @@ class ModRequestTests(unittest.TestCase):
             self.assertEqual(payload["text"], "Hello")
             self.assertEqual(payload["recipient_userid"], "KU_example")
 
+    def test_writes_bridge_status_for_the_game_panel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = self.make_app(root / "requests.json")
+            app.settings.bridge_status_file = root / "bridge_status.json"
+            app.settings.reply_file = root / "reply.json"
+            app.settings.chat_model = "test-model"
+            app._last_request_at_unix = 123.0
+            app._last_request_action = "stop_recording"
+
+            app._write_bridge_status(force=True)
+
+            payload = json.loads(app.settings.bridge_status_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["chat_model"], "test-model")
+            self.assertEqual(payload["last_request_at_unix"], 123.0)
+            self.assertEqual(payload["last_request_action"], "stop_recording")
+            self.assertIn("heartbeat_at_unix", payload)
+
     def test_persists_the_latest_conversation_turns(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
