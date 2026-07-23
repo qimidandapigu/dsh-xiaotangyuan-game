@@ -235,20 +235,23 @@ local function find_or_create_player_chester(player)
     -- This runs only when a player enters. Search the whole playable world so
     -- a Chester that was left behind is reclaimed instead of duplicating it.
     local candidates = GLOBAL.TheSim:FindEntities(x, y, z, 10000, { "chester" }, { "INLIMBO" })
-    local fallback = nil
+    local unowned = {}
     for _, candidate in pairs(candidates) do
         local follower = candidate.components ~= nil and candidate.components.follower or nil
         if candidate._chester_ai_owner_userid == player.userid
             or (follower ~= nil and follower.leader == player) then
             return candidate, false
         end
-        if fallback == nil and candidate._chester_ai_owner_userid == nil then
-            fallback = candidate
+        if candidate._chester_ai_owner_userid == nil then
+            table.insert(unowned, candidate)
         end
     end
 
-    if fallback ~= nil then
-        return fallback, false
+    -- Migrate an old single-Chester save without creating another companion.
+    -- When there is more than one unowned Chester, do not guess: each player
+    -- must receive a distinct new companion instead of claiming a stranger's.
+    if #unowned == 1 then
+        return unowned[1], false
     end
 
     local chester = GLOBAL.SpawnPrefab("chester")
@@ -257,6 +260,36 @@ local function find_or_create_player_chester(player)
         return chester, true
     end
     return nil, false
+end
+
+local function is_chester_owner(chester, player)
+    return chester ~= nil
+        and player ~= nil
+        and player.userid ~= nil
+        and chester._chester_ai_owner_userid ~= nil
+        and chester._chester_ai_owner_userid == player.userid
+end
+
+local function secure_chester_container(inst)
+    local container = inst.components ~= nil and inst.components.container or nil
+    if container == nil or inst._chester_ai_open_guard_installed then
+        return
+    end
+    inst._chester_ai_open_guard_installed = true
+    local old_open = container.Open
+    container.Open = function(component, doer)
+        if inst._chester_ai_owner_userid ~= nil and not is_chester_owner(inst, doer) then
+            diagnostic(
+                "blocked Chester container open: owner=" .. tostring(inst._chester_ai_owner_userid)
+                    .. "; player=" .. tostring(doer ~= nil and doer.userid or "nil")
+            )
+            if doer ~= nil and doer.components ~= nil and doer.components.talker ~= nil then
+                doer.components.talker:Say("这不是你的切斯特。", 3, nil, true)
+            end
+            return
+        end
+        return old_open(component, doer)
+    end
 end
 
 local function remove_player_eyebones(player)
@@ -291,6 +324,8 @@ local function ensure_player_chester(player)
     end
 
     chester._chester_ai_owner_userid = player.userid
+    chester:AddTag("chester_ai_companion")
+    secure_chester_container(chester)
     chester.components.follower:SetLeader(player)
     local removed = remove_player_eyebones(player)
     diagnostic(
@@ -336,6 +371,25 @@ local function find_chester_near_any_player()
         local chester = find_chester_near_player(player)
         if chester ~= nil then
             return chester
+        end
+    end
+    return nil
+end
+
+local function find_chester_for_userid(userid)
+    if type(userid) ~= "string" or userid == "" then
+        return nil
+    end
+    for _, player in pairs(GLOBAL.AllPlayers or {}) do
+        if player ~= nil and player.userid == userid and player.Transform ~= nil then
+            local x, y, z = player.Transform:GetWorldPosition()
+            local candidates = GLOBAL.TheSim:FindEntities(x, y, z, 100, { "chester" }, { "INLIMBO" })
+            for _, candidate in pairs(candidates or {}) do
+                if candidate._chester_ai_owner_userid == userid then
+                    return candidate
+                end
+            end
+            return nil
         end
     end
     return nil
@@ -524,6 +578,9 @@ local function write_recording_request(action)
     local event = {
         id = tostring(timestamp) .. "-" .. tostring(request_sequence),
         action = action,
+        -- The key handler runs on the requesting client, so this identifies
+        -- exactly which player's Chester should speak the eventual reply.
+        recipient_userid = GLOBAL.ThePlayer ~= nil and GLOBAL.ThePlayer.userid or nil,
         created_at_unix = timestamp,
         game_time_seconds = round(GLOBAL.GetTime(), 2),
         state = build_state(),
@@ -690,10 +747,19 @@ local function show_reply()
     end
     last_reply_id = reply.id
 
-    diagnostic("new Python reply: id=" .. reply.id .. "; length=" .. tostring(#reply.text))
-    local chester = find_chester_near_any_player()
+    local recipient_userid = reply.recipient_userid
+    diagnostic(
+        "new Python reply: id=" .. reply.id
+            .. "; length=" .. tostring(#reply.text)
+            .. "; recipient=" .. tostring(recipient_userid)
+    )
+    local chester = find_chester_for_userid(recipient_userid)
+    if chester == nil and (recipient_userid == nil or recipient_userid == "") then
+        -- Compatibility for replies generated by an older Python sidecar.
+        chester = find_chester_near_any_player()
+    end
     if chester == nil then
-        diagnostic("cannot show Python reply: no Chester near a player")
+        diagnostic("cannot show Python reply: no Chester for recipient=" .. tostring(recipient_userid))
         return
     end
     if chester.components == nil or chester.components.talker == nil then
@@ -701,7 +767,7 @@ local function show_reply()
         return
     end
     chester.components.talker:Say(reply.text, 8, nil, true)
-    diagnostic("Python reply shown by Chester")
+    diagnostic("Python reply shown by Chester; recipient=" .. tostring(recipient_userid))
 end
 
 local function ignore_reply_left_by_previous_session()
@@ -772,6 +838,7 @@ AddPrefabPostInit("chester", function(inst)
         -- Chester is an AI companion, not a combat unit. Do not let hostile
         -- creatures select it, and make it immune to any incidental damage.
         inst:AddTag("notarget")
+        secure_chester_container(inst)
         if inst.components.health ~= nil then
             inst.components.health:SetInvincible(true)
         end
@@ -791,6 +858,9 @@ AddPrefabPostInit("chester", function(inst)
             end
             if data ~= nil then
                 chester._chester_ai_owner_userid = data.chester_ai_owner_userid
+                if chester._chester_ai_owner_userid ~= nil then
+                    chester:AddTag("chester_ai_companion")
+                end
             end
         end
     end

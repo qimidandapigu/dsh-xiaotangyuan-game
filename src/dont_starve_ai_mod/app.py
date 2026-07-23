@@ -21,7 +21,11 @@ LOGGER = logging.getLogger("chester")
 HISTORY_LIMIT = 10
 
 
-def write_reply(path: Path | None, text: str) -> None:
+def write_reply(
+    path: Path | None,
+    text: str,
+    recipient_userid: str | None = None,
+) -> None:
     if path is None:
         LOGGER.warning("回复文件路径不可用，已跳过游戏内气泡显示")
         return
@@ -31,6 +35,8 @@ def write_reply(path: Path | None, text: str) -> None:
         "text": text,
         "created_at_unix": time.time(),
     }
+    if recipient_userid:
+        payload["recipient_userid"] = recipient_userid
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     os.replace(temporary, path)
@@ -137,11 +143,12 @@ class ChesterApp:
         self,
         wav: bytes,
         request_state: dict[str, object] | None = None,
+        recipient_userid: str | None = None,
     ) -> None:
         if not wav:
             message = "我没有听到声音，请按住 V 再说一次。"
             LOGGER.warning(message)
-            write_reply(self.settings.reply_file, message)
+            write_reply(self.settings.reply_file, message, recipient_userid)
             return
         with self._busy:
             screenshot, context = self.capture_context(request_state)
@@ -150,16 +157,22 @@ class ChesterApp:
             if not text:
                 message = "我没有听清楚，请按住 V 再说一次。"
                 LOGGER.warning(message)
-                write_reply(self.settings.reply_file, message)
+                write_reply(self.settings.reply_file, message, recipient_userid)
                 return
-            self._answer(text, screenshot, context)
+            self._answer(text, screenshot, context, recipient_userid)
 
     def process_text(self, text: str) -> str:
         with self._busy:
             screenshot, context = self.capture_context()
             return self._answer(text, screenshot, context)
 
-    def _answer(self, text: str, screenshot: bytes, context: dict[str, object]) -> str:
+    def _answer(
+        self,
+        text: str,
+        screenshot: bytes,
+        context: dict[str, object],
+        recipient_userid: str | None = None,
+    ) -> str:
         LOGGER.info("玩家：%s", text)
         LOGGER.info(
             "正在等待 AI 回答（思考模式=%s，最长等待 %.0f 秒）……",
@@ -169,7 +182,7 @@ class ChesterApp:
         reply = self.ai.chat(text, screenshot, context)
         self._record_conversation_turn(text, reply)
         LOGGER.info("切斯特：%s", reply)
-        write_reply(self.settings.reply_file, reply)
+        write_reply(self.settings.reply_file, reply, recipient_userid)
         wav = self.ai.synthesize(reply)
         play_wav(wav)
         return reply
@@ -177,15 +190,20 @@ class ChesterApp:
     def retry_last_question(
         self,
         request_state: dict[str, object] | None = None,
+        recipient_userid: str | None = None,
     ) -> None:
         question = self._last_question
         if not question:
-            write_reply(self.settings.reply_file, "我还没有听到上一句话，先按住 V 和我说话吧。")
+            write_reply(
+                self.settings.reply_file,
+                "我还没有听到上一句话，先按住 V 和我说话吧。",
+                recipient_userid,
+            )
             return
         with self._busy:
             screenshot, context = self.capture_context(request_state)
             LOGGER.info("正在重试上一条问题：%s", question)
-            self._answer(question, screenshot, context)
+            self._answer(question, screenshot, context, recipient_userid)
 
     def run_mod_request_loop(self, poll_interval: float = 0.05) -> None:
         path = self.settings.request_file
@@ -238,6 +256,11 @@ class ChesterApp:
         if isinstance(request_id, str) and request_id:
             return request_id
         return json.dumps(request, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    def _recipient_userid(request: dict[str, object]) -> str | None:
+        userid = request.get("recipient_userid")
+        return userid if isinstance(userid, str) and userid else None
 
     def _load_mod_request_events(self, path: Path) -> list[dict[str, object]]:
         try:
@@ -297,13 +320,18 @@ class ChesterApp:
             return
 
         if action == "retry_last":
+            recipient_userid = self._recipient_userid(request)
             if self._busy.locked() or self.recorder.is_recording:
-                write_reply(self.settings.reply_file, "我还在处理上一句话，请稍等一下。")
+                write_reply(
+                    self.settings.reply_file,
+                    "我还在处理上一句话，请稍等一下。",
+                    recipient_userid,
+                )
                 return
             state = request.get("state")
             threading.Thread(
                 target=self._safe_retry_last_question,
-                args=(state if isinstance(state, dict) else None,),
+                args=(state if isinstance(state, dict) else None, recipient_userid),
                 daemon=True,
                 name="chester-retry",
             ).start()
@@ -314,6 +342,7 @@ class ChesterApp:
             write_reply(
                 self.settings.reply_file,
                 "我没有认出这个指令，请重启切斯特 AI 后再试一次。",
+                self._recipient_userid(request),
             )
             return
         if not self.recorder.is_recording:
@@ -325,7 +354,11 @@ class ChesterApp:
             LOGGER.info("录音已停止：wav_bytes=%s state=%s", len(wav), isinstance(state, dict))
             threading.Thread(
                 target=self._safe_process_audio,
-                args=(wav, state if isinstance(state, dict) else None),
+                args=(
+                    wav,
+                    state if isinstance(state, dict) else None,
+                    self._recipient_userid(request),
+                ),
                 daemon=True,
                 name="chester-turn",
             ).start()
@@ -380,29 +413,31 @@ class ChesterApp:
         self,
         wav: bytes,
         request_state: dict[str, object] | None = None,
+        recipient_userid: str | None = None,
     ) -> None:
         try:
-            self.process_audio(wav, request_state)
+            self.process_audio(wav, request_state, recipient_userid)
         except requests.Timeout:
             message = "AI 接口响应超时了，请再按 V 重试一次。"
             LOGGER.error("%s 当前对话已经结束，程序没有死机。", message)
-            write_reply(self.settings.reply_file, message)
+            write_reply(self.settings.reply_file, message, recipient_userid)
         except Exception:
             message = "我刚才走神了，请按住 V 再问一次。"
             LOGGER.exception("本次切斯特对话处理失败")
-            write_reply(self.settings.reply_file, message)
+            write_reply(self.settings.reply_file, message, recipient_userid)
 
     def _safe_retry_last_question(
         self,
         request_state: dict[str, object] | None = None,
+        recipient_userid: str | None = None,
     ) -> None:
         try:
-            self.retry_last_question(request_state)
+            self.retry_last_question(request_state, recipient_userid)
         except requests.Timeout:
             message = "重新提问超时了，请稍后按 Shift+V 再试一次。"
             LOGGER.error("%s", message)
-            write_reply(self.settings.reply_file, message)
+            write_reply(self.settings.reply_file, message, recipient_userid)
         except Exception:
             message = "我没能重新回答上一句话，请稍后按 Shift+V 再试一次。"
             LOGGER.exception("重试上一条问题失败")
-            write_reply(self.settings.reply_file, message)
+            write_reply(self.settings.reply_file, message, recipient_userid)

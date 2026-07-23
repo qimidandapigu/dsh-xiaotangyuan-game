@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from dont_starve_ai_mod.app import ChesterApp
+from dont_starve_ai_mod.app import ChesterApp, write_reply
 
 
 class ModRequestTests(unittest.TestCase):
@@ -102,8 +102,21 @@ class ModRequestTests(unittest.TestCase):
                 )
 
             app.recorder.stop.assert_called_once_with()
-            self.assertEqual(thread.call_args.kwargs["args"], (b"wav", state))
+            self.assertEqual(
+                thread.call_args.kwargs["args"],
+                (b"wav", state, None),
+            )
             thread.return_value.start.assert_called_once_with()
+
+    def test_writes_reply_recipient_userid_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reply.json"
+
+            write_reply(path, "Hello", "KU_example")
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["text"], "Hello")
+            self.assertEqual(payload["recipient_userid"], "KU_example")
 
     def test_persists_the_latest_conversation_turns(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -133,9 +146,26 @@ class ModRequestTests(unittest.TestCase):
             with patch("dont_starve_ai_mod.app.threading.Thread") as thread:
                 app._handle_mod_request({"id": "3", "action": "retry_last", "state": state})
 
-            self.assertEqual(thread.call_args.kwargs["args"], (state,))
+            self.assertEqual(thread.call_args.kwargs["args"], (state, None))
             self.assertEqual(thread.call_args.kwargs["name"], "chester-retry")
             thread.return_value.start.assert_called_once_with()
+
+    def test_request_recipient_is_forwarded_to_processing_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(Path(directory) / "requests.json")
+            app.recorder.is_recording = True
+            app.recorder.stop.return_value = b"wav"
+
+            with patch("dont_starve_ai_mod.app.threading.Thread") as thread:
+                app._handle_mod_request(
+                    {
+                        "id": "4",
+                        "action": "stop_recording",
+                        "recipient_userid": "KU_example",
+                    }
+                )
+
+            self.assertEqual(thread.call_args.kwargs["args"], (b"wav", None, "KU_example"))
 
 
 if __name__ == "__main__":

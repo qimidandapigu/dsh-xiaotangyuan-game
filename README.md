@@ -138,7 +138,8 @@ The Lua mod also refreshes `dont_starve_ai_mod_state.json` for diagnostics. Reco
 commands are stored as an event array in `dont_starve_ai_mod_requests.json`, and the
 Python sidecar consumes each event ID once. The Lua sandbox is kept free of network
 and audio work. API keys stay only in the sidecar's local `.env` file, which is ignored
-by Git.
+by Git. For multiplayer requests, the event and generated reply carry the requesting
+player's `recipient_userid`, so only that player's assigned Chester displays the reply.
 
 ## Development
 
