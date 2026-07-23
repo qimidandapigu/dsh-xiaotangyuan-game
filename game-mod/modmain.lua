@@ -28,6 +28,7 @@ end
 local CHESTER_LIGHT_ENABLED = GetModConfigData("chester_light_enabled") == true
 local CHESTER_LIGHT_RADIUS = tonumber(GetModConfigData("chester_light_radius")) or 3
 CHESTER_LIGHT_RADIUS = math.max(1, math.min(CHESTER_LIGHT_RADIUS, 5))
+local CHESTER_RECALL_DISTANCE = 48
 
 local last_reply_id = ""
 local voice_key_down = false
@@ -281,12 +282,12 @@ end
 
 local function ensure_player_chester(player)
     if player == nil or player.components == nil then
-        return
+        return nil
     end
     local chester, created = find_or_create_player_chester(player)
     if chester == nil or chester.components == nil or chester.components.follower == nil then
         diagnostic("unable to assign Chester for player=" .. tostring(player.userid))
-        return
+        return nil
     end
 
     chester._chester_ai_owner_userid = player.userid
@@ -296,6 +297,37 @@ local function ensure_player_chester(player)
         "Chester assigned: player=" .. tostring(player.userid)
             .. "; created=" .. tostring(created)
             .. "; removed_eyebones=" .. tostring(removed)
+    )
+    return chester
+end
+
+local function recall_player_chester(player, reason, force)
+    if player == nil or player.Transform == nil then
+        return
+    end
+
+    local chester = ensure_player_chester(player)
+    if chester == nil or chester.Transform == nil then
+        return
+    end
+
+    local player_x, player_y, player_z = player.Transform:GetWorldPosition()
+    local chester_x, _, chester_z = chester.Transform:GetWorldPosition()
+    local dx = chester_x - player_x
+    local dz = chester_z - player_z
+    local distance_squared = dx * dx + dz * dz
+    local should_recall = force or distance_squared > CHESTER_RECALL_DISTANCE * CHESTER_RECALL_DISTANCE
+    if not should_recall then
+        return
+    end
+
+    -- Place Chester at the player's current valid position. This works for a
+    -- ghost, resurrection at a touch stone, and a Chester stranded far away.
+    chester.Transform:SetPosition(player_x, player_y, player_z)
+    diagnostic(
+        "Chester recalled: player=" .. tostring(player.userid)
+            .. "; reason=" .. tostring(reason)
+            .. "; force=" .. tostring(force)
     )
 end
 
@@ -754,7 +786,28 @@ AddPlayerPostInit(function(player)
     if GLOBAL.TheWorld == nil or not GLOBAL.TheWorld.ismastersim then
         return
     end
-    player:DoTaskInTime(2, ensure_player_chester)
+    player:DoTaskInTime(2, function()
+        recall_player_chester(player, "player_joined_or_migrated", true)
+    end)
+
+    -- A player entity persists through death and revival, so these listeners
+    -- cover both states without spawning a second Chester. The small delay
+    -- lets the game's ghost/resurrection placement finish first.
+    player:ListenForEvent("ms_becameghost", function()
+        player:DoTaskInTime(1, function()
+            recall_player_chester(player, "player_died", true)
+        end)
+    end)
+    player:ListenForEvent("ms_respawnedfromghost", function()
+        player:DoTaskInTime(1, function()
+            recall_player_chester(player, "player_revived", true)
+        end)
+    end)
+    -- Followers normally walk back by themselves. This is a safety net for
+    -- teleports, pathing failures, and players who leave Chester behind.
+    player:DoPeriodicTask(10, function()
+        recall_player_chester(player, "too_far_away", false)
+    end, 10)
 end)
 
 AddPrefabPostInit("world", function(inst)
