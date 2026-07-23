@@ -208,6 +208,31 @@ class ChesterApp:
             LOGGER.info("正在重试上一条问题：%s", question)
             self._answer(question, screenshot, context, recipient_userid)
 
+    def process_game_reminder(
+        self,
+        kind: str,
+        fallback_message: str,
+        request_state: dict[str, object] | None = None,
+        recipient_userid: str | None = None,
+    ) -> None:
+        """Ask AI for a short situational reminder without altering chat history."""
+        with self._busy:
+            screenshot, context = self.capture_context(request_state)
+            prompt = (
+                "这是一条游戏内自动提醒，不是玩家提问。"
+                f"提醒类型：{kind}。基础提醒：{fallback_message}\n"
+                "请以切斯特的口吻改写成一句自然、实用的中文提醒，不超过 30 个汉字。"
+                "不要使用角色前缀、Markdown、解释或反问。"
+            )
+            reply = self.ai.chat(
+                prompt,
+                screenshot,
+                context,
+                include_history=False,
+                remember=False,
+            )
+            write_reply(self.settings.reply_file, reply or fallback_message, recipient_userid)
+
     def run_mod_request_loop(self, poll_interval: float = 0.05) -> None:
         path = self.settings.request_file
         if path is None:
@@ -362,6 +387,30 @@ class ChesterApp:
                 LOGGER.exception("录音启动失败")
             return
 
+        if action == "game_reminder":
+            reminder = request.get("reminder")
+            kind = reminder.get("kind") if isinstance(reminder, dict) else None
+            message = reminder.get("message") if isinstance(reminder, dict) else None
+            if not isinstance(kind, str) or not isinstance(message, str) or not message:
+                LOGGER.warning("Ignoring malformed game reminder event")
+                return
+            if self._busy.locked() or self.recorder.is_recording:
+                LOGGER.info("Skipping AI game reminder while voice processing is active: %s", kind)
+                return
+            state = request.get("state")
+            threading.Thread(
+                target=self._safe_process_game_reminder,
+                args=(
+                    kind,
+                    message,
+                    state if isinstance(state, dict) else None,
+                    self._recipient_userid(request),
+                ),
+                daemon=True,
+                name="chester-game-reminder",
+            ).start()
+            return
+
         if action == "retry_last":
             recipient_userid = self._recipient_userid(request)
             if self._busy.locked() or self.recorder.is_recording:
@@ -468,6 +517,22 @@ class ChesterApp:
             message = "我刚才走神了，请按住 V 再问一次。"
             LOGGER.exception("本次切斯特对话处理失败")
             write_reply(self.settings.reply_file, message, recipient_userid)
+
+    def _safe_process_game_reminder(
+        self,
+        kind: str,
+        fallback_message: str,
+        request_state: dict[str, object] | None = None,
+        recipient_userid: str | None = None,
+    ) -> None:
+        try:
+            self.process_game_reminder(kind, fallback_message, request_state, recipient_userid)
+        except requests.Timeout:
+            LOGGER.warning("AI game reminder timed out; using fixed text: %s", kind)
+            write_reply(self.settings.reply_file, fallback_message, recipient_userid)
+        except Exception:
+            LOGGER.exception("AI game reminder failed; using fixed text: %s", kind)
+            write_reply(self.settings.reply_file, fallback_message, recipient_userid)
 
     def _safe_retry_last_question(
         self,

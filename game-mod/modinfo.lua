@@ -51,6 +51,78 @@ configuration_options = {
         },
         default = 3,
     },
+    {
+        name = "reminder_health",
+        label = "低血量提醒",
+        hover = "生命低于 30% 时让切斯特提醒。",
+        options = {
+            choice("关闭", false),
+            choice("开启（默认）", true),
+        },
+        default = true,
+    },
+    {
+        name = "reminder_hunger",
+        label = "饥饿提醒",
+        hover = "饥饿低于 25% 时让切斯特提醒。",
+        options = {
+            choice("关闭", false),
+            choice("开启（默认）", true),
+        },
+        default = true,
+    },
+    {
+        name = "reminder_night",
+        label = "夜晚提醒",
+        hover = "进入夜晚时让切斯特提醒准备照明。",
+        options = {
+            choice("关闭", false),
+            choice("开启（默认）", true),
+        },
+        default = true,
+    },
+    {
+        name = "reminder_wet",
+        label = "潮湿提醒",
+        hover = "潮湿高于 60% 时让切斯特提醒。",
+        options = {
+            choice("关闭", false),
+            choice("开启（默认）", true),
+        },
+        default = true,
+    },
+    {
+        name = "reminder_boss",
+        label = "附近 Boss 提醒",
+        hover = "24 格内发现带 epic 标签的 Boss 时让切斯特提醒。",
+        options = {
+            choice("关闭", false),
+            choice("开启（默认）", true),
+        },
+        default = true,
+    },
+    {
+        name = "reminder_cooldown",
+        label = "游戏提醒冷却",
+        hover = "同一位玩家两次游戏提醒之间的最短间隔。",
+        options = {
+            choice("30 秒", 30),
+            choice("60 秒", 60),
+            choice("120 秒（默认）", 120),
+            choice("300 秒", 300),
+        },
+        default = 120,
+    },
+    {
+        name = "reminder_ai_enabled",
+        label = "AI 润色游戏提醒",
+        hover = "开启后，游戏提醒会交给 Python AI 生成一句情境化回复；关闭时使用固定提醒文本。",
+        options = {
+            choice("关闭（默认）", false),
+            choice("开启", true),
+        },
+        default = false,
+    },
 }
 
 icon_atlas = nil

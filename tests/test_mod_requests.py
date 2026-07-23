@@ -185,6 +185,26 @@ class ModRequestTests(unittest.TestCase):
 
             self.assertEqual(thread.call_args.kwargs["args"], (b"wav", None, "KU_example"))
 
+    def test_game_reminder_starts_an_ephemeral_ai_request(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app = self.make_app(Path(directory) / "requests.json")
+
+            with patch("dont_starve_ai_mod.app.threading.Thread") as thread:
+                app._handle_mod_request(
+                    {
+                        "id": "5",
+                        "action": "game_reminder",
+                        "recipient_userid": "KU_example",
+                        "reminder": {"kind": "night", "message": "天黑了。"},
+                    }
+                )
+
+            self.assertEqual(
+                thread.call_args.kwargs["args"],
+                ("night", "天黑了。", None, "KU_example"),
+            )
+            self.assertEqual(thread.call_args.kwargs["name"], "chester-game-reminder")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,19 @@ local CHESTER_LIGHT_RADIUS = tonumber(GetModConfigData("chester_light_radius")) 
 CHESTER_LIGHT_RADIUS = math.max(1, math.min(CHESTER_LIGHT_RADIUS, 5))
 local CHESTER_RECALL_DISTANCE = 48
 local STATUS_PANEL_KEY = GLOBAL.KEY_F8 or 119
+local REMINDER_HEALTH_ENABLED = GetModConfigData("reminder_health") ~= false
+local REMINDER_HUNGER_ENABLED = GetModConfigData("reminder_hunger") ~= false
+local REMINDER_NIGHT_ENABLED = GetModConfigData("reminder_night") ~= false
+local REMINDER_WET_ENABLED = GetModConfigData("reminder_wet") ~= false
+local REMINDER_BOSS_ENABLED = GetModConfigData("reminder_boss") ~= false
+local REMINDER_COOLDOWN = tonumber(GetModConfigData("reminder_cooldown")) or 120
+local REMINDER_AI_ENABLED = GetModConfigData("reminder_ai_enabled") == true
+REMINDER_COOLDOWN = math.max(15, REMINDER_COOLDOWN)
+local REMINDER_INTERVAL = 5
+local REMINDER_HEALTH_THRESHOLD = 0.30
+local REMINDER_HUNGER_THRESHOLD = 0.25
+local REMINDER_WET_THRESHOLD = 0.60
+local REMINDER_BOSS_RADIUS = 24
 
 local last_reply_id = ""
 local voice_key_down = false
@@ -39,6 +52,8 @@ local status_panel_key_down = false
 local status_panel_key_handlers_installed = false
 local status_panel_visible = false
 local request_sequence = 0
+local find_chester_for_userid
+local queue_game_reminder_request
 
 local function configure_chester_container(slot_count)
     local containers = GLOBAL.require("containers")
@@ -371,6 +386,99 @@ local function recall_player_chester(player, reason, force)
     )
 end
 
+local function player_percent(player, component_name, method_name)
+    local component = player ~= nil and player.components ~= nil and player.components[component_name] or nil
+    if component == nil or component[method_name] == nil then
+        return nil
+    end
+    local ok, value = pcall(component[method_name], component)
+    return ok and value or nil
+end
+
+local function find_nearby_boss(player)
+    if player == nil or player.Transform == nil or GLOBAL.TheSim == nil then
+        return nil
+    end
+    local x, y, z = player.Transform:GetWorldPosition()
+    local ok, entities = pcall(
+        GLOBAL.TheSim.FindEntities,
+        GLOBAL.TheSim,
+        x,
+        y,
+        z,
+        REMINDER_BOSS_RADIUS,
+        { "epic" },
+        { "INLIMBO", "player", "chester" }
+    )
+    if not ok or type(entities) ~= "table" then
+        return nil
+    end
+    return entities[1]
+end
+
+local function say_game_reminder(player, kind, message)
+    if player == nil or player.userid == nil then
+        return false
+    end
+    local now = GLOBAL.GetTime()
+    player._chester_ai_last_reminder_time = player._chester_ai_last_reminder_time or -REMINDER_COOLDOWN
+    if now - player._chester_ai_last_reminder_time < REMINDER_COOLDOWN then
+        return false
+    end
+    if REMINDER_AI_ENABLED and queue_game_reminder_request ~= nil then
+        local queued, queue_error = queue_game_reminder_request(player, kind, message)
+        if queued then
+            player._chester_ai_last_reminder_time = now
+            diagnostic("AI game reminder queued: kind=" .. kind .. "; player=" .. tostring(player.userid))
+            return true
+        end
+        diagnostic("AI game reminder queue failed; using fixed text: " .. tostring(queue_error))
+    end
+    local chester = find_chester_for_userid(player.userid)
+    if chester == nil or chester.components == nil or chester.components.talker == nil then
+        diagnostic("game reminder skipped: Chester unavailable; player=" .. tostring(player.userid))
+        return false
+    end
+    chester.components.talker:Say(message, 5, nil, true)
+    player._chester_ai_last_reminder_time = now
+    diagnostic("game reminder shown: kind=" .. kind .. "; player=" .. tostring(player.userid))
+    return true
+end
+
+local function check_game_reminders(player)
+    if player == nil or player:HasTag("playerghost") then
+        return
+    end
+    local health = player_percent(player, "health", "GetPercent")
+    if REMINDER_HEALTH_ENABLED and health ~= nil and health <= REMINDER_HEALTH_THRESHOLD then
+        say_game_reminder(player, "low_health", "主人，你的生命很危险，先躲开并治疗吧！")
+        return
+    end
+
+    local boss = REMINDER_BOSS_ENABLED and find_nearby_boss(player) or nil
+    if boss ~= nil then
+        say_game_reminder(player, "nearby_boss", "主人，附近有强大的敌人，先做好战斗准备！")
+        return
+    end
+
+    local hunger = player_percent(player, "hunger", "GetPercent")
+    if REMINDER_HUNGER_ENABLED and hunger ~= nil and hunger <= REMINDER_HUNGER_THRESHOLD then
+        say_game_reminder(player, "low_hunger", "主人，你快饿坏了，先吃点东西吧！")
+        return
+    end
+
+    local world_state = GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.state or nil
+    if REMINDER_NIGHT_ENABLED and world_state ~= nil and world_state.isnight then
+        say_game_reminder(player, "night", "天黑了，记得准备照明，别让黑暗靠近！")
+        return
+    end
+
+    local wetness = player_percent(player, "moisture", "GetMoisturePercent")
+    if REMINDER_WET_ENABLED and wetness ~= nil and wetness >= REMINDER_WET_THRESHOLD then
+        say_game_reminder(player, "wet", "主人，你已经很潮湿了，注意保暖和闪电！")
+    end
+end
+
 local function find_chester_near_any_player()
     for _, player in pairs(GLOBAL.AllPlayers or {}) do
         local chester = find_chester_near_player(player)
@@ -381,7 +489,7 @@ local function find_chester_near_any_player()
     return nil
 end
 
-local function find_chester_for_userid(userid)
+find_chester_for_userid = function(userid)
     if type(userid) ~= "string" or userid == "" then
         return nil
     end
@@ -591,6 +699,33 @@ local function write_recording_request(action)
         state = build_state(),
     }
 
+    local document = read_json(REQUEST_PATH)
+    if type(document) ~= "table" or type(document.events) ~= "table" then
+        document = { schema_version = 1, events = {} }
+    end
+    table.insert(document.events, event)
+    while #document.events > 100 do
+        table.remove(document.events, 1)
+    end
+    return write_json(REQUEST_PATH, document)
+end
+
+queue_game_reminder_request = function(player, kind, message)
+    if player == nil or player.userid == nil then
+        return false, "player userid unavailable"
+    end
+    request_sequence = request_sequence + 1
+    local timestamp = GLOBAL.os ~= nil and GLOBAL.os.time ~= nil and GLOBAL.os.time() or 0
+    local event = {
+        id = tostring(timestamp) .. "-reminder-" .. tostring(request_sequence),
+        action = "game_reminder",
+        recipient_userid = player.userid,
+        created_at_unix = timestamp,
+        reminder = {
+            kind = kind,
+            message = message,
+        },
+    }
     local document = read_json(REQUEST_PATH)
     if type(document) ~= "table" or type(document.events) ~= "table" then
         document = { schema_version = 1, events = {} }
@@ -1065,6 +1200,11 @@ AddPlayerPostInit(function(player)
     player:DoPeriodicTask(10, function()
         recall_player_chester(player, "too_far_away", false)
     end, 10)
+    -- All reminder types share a per-player cooldown, so even when several
+    -- conditions are true Chester says at most one short warning at a time.
+    player:DoPeriodicTask(REMINDER_INTERVAL, function()
+        check_game_reminders(player)
+    end, REMINDER_INTERVAL)
 end)
 
 AddPrefabPostInit("world", function(inst)

@@ -42,6 +42,28 @@ class AiClientTests(unittest.TestCase):
         self.assertEqual(client.chat("hello", b"png", {}), "ok")
         self.assertEqual(session.payload["thinking"], {"type": "disabled"})
 
+    def test_ephemeral_chat_does_not_include_or_store_history(self) -> None:
+        settings = SimpleNamespace(
+            api_key="test",
+            chat_url="https://example.test/chat",
+            chat_model="gpt-4o-mini",
+            reply_language="Chinese",
+            request_timeout_seconds=30,
+            vision_thinking=False,
+        )
+        client = AiClient(settings)
+        client.history.append(("user", "older question"))
+        session = FakeSession()
+        client.session = session
+
+        self.assertEqual(
+            client.chat("reminder", b"png", {}, include_history=False, remember=False),
+            "ok",
+        )
+
+        self.assertEqual(len(session.payload["messages"]), 2)
+        self.assertEqual(list(client.history), [("user", "older question")])
+
 
 if __name__ == "__main__":
     unittest.main()

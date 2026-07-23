@@ -66,14 +66,23 @@ class AiClient:
         text = response.json().get("text", "")
         return str(text).strip()
 
-    def chat(self, user_text: str, screenshot: bytes, context: dict[str, Any]) -> str:
+    def chat(
+        self,
+        user_text: str,
+        screenshot: bytes,
+        context: dict[str, Any],
+        *,
+        include_history: bool = True,
+        remember: bool = True,
+    ) -> str:
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
                 "content": build_system_prompt(context, self.settings.reply_language),
             }
         ]
-        messages.extend({"role": role, "content": content} for role, content in self.history)
+        if include_history:
+            messages.extend({"role": role, "content": content} for role, content in self.history)
         image = base64.b64encode(screenshot).decode("ascii")
         messages.append(
             {
@@ -109,8 +118,9 @@ class AiClient:
                 str(part.get("text", "")) for part in content if isinstance(part, dict)
             )
         reply = clean_reply(str(content))
-        self.history.append(("user", user_text))
-        self.history.append(("assistant", reply))
+        if remember:
+            self.history.append(("user", user_text))
+            self.history.append(("assistant", reply))
         return reply
 
     def synthesize(self, text: str) -> bytes:
