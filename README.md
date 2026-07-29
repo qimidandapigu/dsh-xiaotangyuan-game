@@ -55,7 +55,7 @@ To build the complete player ZIP without private credentials:
 .\scripts\build-player-package.ps1
 ```
 
-For a private, trusted test group only, explicitly include the local `.env`:
+For a private, trusted test group only, explicitly include the local `dist/.env`:
 
 ```powershell
 .\scripts\build-player-package.ps1 -IncludeLocalEnv
@@ -98,7 +98,7 @@ The latest 10 question-and-answer pairs are saved in `runtime/conversation_histo
 
 ## Configuration
 
-Copy `.env.example` to `.env`. At minimum set `AI_API_KEY`. The defaults use the
+Copy `.env.example` to `dist/.env`. At minimum set `AI_API_KEY`. The defaults use the
 standard `/v1/audio/transcriptions`, `/v1/chat/completions`, and `/v1/audio/speech`
 routes. Override individual URLs for other compatible providers.
 
@@ -137,7 +137,7 @@ game window ├──> Python sidecar ──> ASR + vision chat + TTS ──> sp
 The Lua mod also refreshes `dont_starve_ai_mod_state.json` for diagnostics. Recording
 commands are stored as an event array in `dont_starve_ai_mod_requests.json`, and the
 Python sidecar consumes each event ID once. The Lua sandbox is kept free of network
-and audio work. API keys stay only in the sidecar's local `.env` file, which is ignored
+and audio work. API keys stay only in the sidecar's local `dist/.env` file, which is ignored
 by Git. For multiplayer requests, the event and generated reply carry the requesting
 player's `recipient_userid`, so only that player's assigned Chester displays the reply.
 The HUD also reads `dont_starve_ai_mod_bridge_status.json`, a secret-free heartbeat

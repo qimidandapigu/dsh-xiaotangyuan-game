@@ -23,8 +23,12 @@ class FakeSession:
 
 class AiClientTests(unittest.TestCase):
     def test_removes_chester_speaker_prefix(self) -> None:
-        self.assertEqual(clean_reply("切斯特：你好，主人！"), "你好，主人！")
+        self.assertEqual(clean_reply("切斯特：你好，主人！"), "你好！")
         self.assertEqual(clean_reply("Chester: Hello!"), "Hello!")
+
+    def test_removes_player_honorifics_from_reply(self) -> None:
+        self.assertEqual(clean_reply("主人，快吃点东西吧！"), "快吃点东西吧！")
+        self.assertEqual(clean_reply("小主人：天黑了。"), "天黑了。")
 
     def test_disables_thinking_for_glm_45_vision(self) -> None:
         settings = SimpleNamespace(

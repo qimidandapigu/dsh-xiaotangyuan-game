@@ -24,7 +24,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
-.env
+dist/.env
 .pytest_cache/
 
 # Runtime captures and local state

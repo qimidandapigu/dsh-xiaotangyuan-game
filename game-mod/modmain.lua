@@ -1,3 +1,7 @@
+Assets = {
+    Asset("ANIM", "anim/jingling.zip"),
+}
+
 local GLOBAL = GLOBAL
 local json = GLOBAL.require("json")
 local io = GLOBAL.io
@@ -451,19 +455,19 @@ local function check_game_reminders(player)
     end
     local health = player_percent(player, "health", "GetPercent")
     if REMINDER_HEALTH_ENABLED and health ~= nil and health <= REMINDER_HEALTH_THRESHOLD then
-        say_game_reminder(player, "low_health", "主人，你的生命很危险，先躲开并治疗吧！")
+        say_game_reminder(player, "low_health", "生命很危险，先躲开并治疗吧！")
         return
     end
 
     local boss = REMINDER_BOSS_ENABLED and find_nearby_boss(player) or nil
     if boss ~= nil then
-        say_game_reminder(player, "nearby_boss", "主人，附近有强大的敌人，先做好战斗准备！")
+        say_game_reminder(player, "nearby_boss", "附近有强大的敌人，先做好战斗准备！")
         return
     end
 
     local hunger = player_percent(player, "hunger", "GetPercent")
     if REMINDER_HUNGER_ENABLED and hunger ~= nil and hunger <= REMINDER_HUNGER_THRESHOLD then
-        say_game_reminder(player, "low_hunger", "主人，你快饿坏了，先吃点东西吧！")
+        say_game_reminder(player, "low_hunger", "快饿坏了，先吃点东西吧！")
         return
     end
 
@@ -475,7 +479,7 @@ local function check_game_reminders(player)
 
     local wetness = player_percent(player, "moisture", "GetMoisturePercent")
     if REMINDER_WET_ENABLED and wetness ~= nil and wetness >= REMINDER_WET_THRESHOLD then
-        say_game_reminder(player, "wet", "主人，你已经很潮湿了，注意保暖和闪电！")
+        say_game_reminder(player, "wet", "已经很潮湿了，注意保暖和闪电！")
     end
 end
 
@@ -1066,8 +1070,56 @@ AddSimPostInit(function()
     end
 end)
 
+-- Keep the original Chester entity (and therefore its follower, container,
+-- save data, and speech behaviour) intact.  Only its renderer is replaced by
+-- a child entity using the custom Jingling animation bank.
+local function install_jingling_visual(inst)
+    if inst == nil or inst.AnimState == nil or inst._jingling_visual ~= nil then
+        return
+    end
+
+    local visual = GLOBAL.CreateEntity()
+    visual.entity:AddTransform()
+    visual.entity:AddAnimState()
+    visual.entity:AddDynamicShadow()
+    visual.entity:SetParent(inst.entity)
+    visual.persists = false
+    visual.AnimState:SetBank("jingling")
+    visual.AnimState:SetBuild("jingling")
+    visual.AnimState:PlayAnimation("idle", true)
+    visual.AnimState:SetFinalOffset(1)
+    visual.DynamicShadow:SetSize(1.15, 0.55)
+
+    local active_animation = "idle"
+    local function update_jingling_motion()
+        local moving = inst.sg ~= nil and inst.sg:HasStateTag("moving")
+        local next_animation = moving and "walk_loop" or "idle"
+        if next_animation ~= active_animation then
+            visual.AnimState:PlayAnimation(next_animation, true)
+            active_animation = next_animation
+        end
+    end
+    -- Stategraph tags are replicated on both the host and clients. Polling is
+    -- deliberate here: it also covers teleports and state changes that do not
+    -- emit a locomote event on a remote client.
+    inst:DoPeriodicTask(0.15, update_jingling_motion)
+    inst:ListenForEvent("locomote", update_jingling_motion)
+
+    -- The base Chester continues to own collisions and all gameplay state but
+    -- is no longer rendered underneath the rabbit companion.
+    inst.AnimState:SetMultColour(1, 1, 1, 0)
+    inst._jingling_visual = visual
+    inst:ListenForEvent("onremove", function()
+        if visual:IsValid() then
+            visual:Remove()
+        end
+    end)
+    diagnostic("Jingling visual installed for Chester: " .. tostring(inst.GUID))
+end
+
 AddPrefabPostInit("chester", function(inst)
     configure_chester_light(inst)
+    install_jingling_visual(inst)
 
     inst._chester_ai_slots = GLOBAL.net_tinybyte(
         inst.GUID,

@@ -16,15 +16,18 @@ from .config import Settings
 
 
 _SPEAKER_PREFIX = re.compile(r"^\s*(?:chester|切斯特)\s*[:：]\s*", re.IGNORECASE)
+_PLAYER_ADDRESS = re.compile(r"(?:小?主人|主公|阁下|勇士|冒险家)\s*[，,、:：]?\s*")
 
 
 def clean_reply(text: str) -> str:
-    """Keep only Chester's spoken words, not a model-supplied speaker label."""
+    """Remove model speaker labels and unwanted player honorifics."""
     reply = text.strip()
     while True:
         cleaned = _SPEAKER_PREFIX.sub("", reply, count=1).strip()
         if cleaned == reply:
-            return reply
+            reply = _PLAYER_ADDRESS.sub("", reply).strip()
+            reply = re.sub(r"^[，,、:：]\s*", "", reply)
+            return re.sub(r"[，,、]\s*([。！？!?])", r"\1", reply)
         reply = cleaned
 
 
@@ -37,6 +40,7 @@ Never claim you can see an object or game fact unless it is supported by the scr
 or context. If context is unavailable or stale, acknowledge uncertainty naturally.
 Keep the spoken answer concise: normally one to three sentences. Do not use markdown.
 Do not prefix the reply with a speaker label such as "Chester:" or "切斯特：".
+Do not address the player as "主人", "小主人", "主公", "阁下", "勇士", or by name.
 Reply in {language}.
 
 CURRENT_CONTEXT_JSON:
