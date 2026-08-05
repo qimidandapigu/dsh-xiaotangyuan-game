@@ -88,6 +88,12 @@ def ensure_game_mod(settings: Settings) -> list[str]:
             shutil.copy2(source_file, destination_file)
             actions.append(f"已安装 {filename}")
 
+    source_anim = source / "anim"
+    if source_anim.is_dir():
+        destination_anim = destination / "anim"
+        shutil.copytree(source_anim, destination_anim, dirs_exist_ok=True)
+        actions.append("已安装 anim")
+
     modsettings = settings.game_dir / "mods" / "modsettings.lua"
     original = modsettings.read_text(encoding="utf-8", errors="replace") if modsettings.exists() else ""
     if _write_if_changed(modsettings, enable_modsettings(original)):

@@ -8,6 +8,7 @@ from unittest.mock import patch
 from dont_starve_ai_mod.mod_installer import (
     enable_modoverride,
     enable_modsettings,
+    ensure_game_mod,
     install_player_launcher,
 )
 
@@ -52,6 +53,23 @@ class ModInstallerTests(unittest.TestCase):
                 (destination / "Steam启动项.txt").read_text(encoding="utf-8"),
                 f"{launch_option}\n",
             )
+
+    def test_installs_packaged_animation_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_mod = root / "game-mod"
+            source_mod.mkdir()
+            (source_mod / "modmain.lua").write_text("-- main", encoding="utf-8")
+            (source_mod / "modinfo.lua").write_text("-- info", encoding="utf-8")
+            (source_mod / "anim").mkdir()
+            (source_mod / "anim" / "jingling.zip").write_bytes(b"animation")
+            settings = SimpleNamespace(game_dir=root / "Don't Starve Together")
+
+            with patch("dont_starve_ai_mod.mod_installer.bundled_game_mod_dir", return_value=source_mod):
+                ensure_game_mod(settings)
+
+            installed = settings.game_dir / "mods" / "dont-starve-ai-mod" / "anim" / "jingling.zip"
+            self.assertEqual(installed.read_bytes(), b"animation")
 
 
 if __name__ == "__main__":

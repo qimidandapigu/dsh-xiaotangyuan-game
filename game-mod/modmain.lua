@@ -33,7 +33,10 @@ end
 local CHESTER_LIGHT_ENABLED = GetModConfigData("chester_light_enabled") == true
 local CHESTER_LIGHT_RADIUS = tonumber(GetModConfigData("chester_light_radius")) or 3
 CHESTER_LIGHT_RADIUS = math.max(1, math.min(CHESTER_LIGHT_RADIUS, 5))
-local CHESTER_RECALL_DISTANCE = 48
+-- Vanilla Chester follows at roughly 6 units but may stretch out to 12. Keep
+-- the companion visibly close when pathing cannot catch up with the player.
+local CHESTER_RECALL_DISTANCE = 8
+local CHESTER_FOLLOW_CHECK_INTERVAL = 2
 local STATUS_PANEL_KEY = GLOBAL.KEY_F8 or 119
 local REMINDER_HEALTH_ENABLED = GetModConfigData("reminder_health") ~= false
 local REMINDER_HUNGER_ENABLED = GetModConfigData("reminder_hunger") ~= false
@@ -122,6 +125,26 @@ local function configure_chester_light(inst)
     inst.Light:SetColour(1, 0.88, 0.62)
     inst.Light:Enable(true)
     inst.Light:EnableClientModulation(true)
+end
+
+local function keep_chester_awake(inst)
+    local sleeper = inst.components ~= nil and inst.components.sleeper or nil
+    if sleeper == nil then
+        return
+    end
+
+    -- Chester's vanilla night sleep stops its brain, which also stops the
+    -- follower behaviour. This companion must remain available to its owner
+    -- at night, so disable the automatic sleep test and wake it if necessary.
+    sleeper:SetSleepTest(function()
+        return false
+    end)
+    sleeper:SetWakeTest(function()
+        return true
+    end)
+    if sleeper:IsAsleep() then
+        sleeper:WakeUp()
+    end
 end
 
 local function diagnostic(message)
@@ -1172,6 +1195,7 @@ AddPrefabPostInit("chester", function(inst)
         if inst.components.health ~= nil then
             inst.components.health:SetInvincible(true)
         end
+        keep_chester_awake(inst)
 
         local old_on_save = inst.OnSave
         inst.OnSave = function(chester, data)
@@ -1249,9 +1273,9 @@ AddPlayerPostInit(function(player)
     end)
     -- Followers normally walk back by themselves. This is a safety net for
     -- teleports, pathing failures, and players who leave Chester behind.
-    player:DoPeriodicTask(10, function()
+    player:DoPeriodicTask(CHESTER_FOLLOW_CHECK_INTERVAL, function()
         recall_player_chester(player, "too_far_away", false)
-    end, 10)
+    end, CHESTER_FOLLOW_CHECK_INTERVAL)
     -- All reminder types share a per-player cooldown, so even when several
     -- conditions are true Chester says at most one short warning at a time.
     player:DoPeriodicTask(REMINDER_INTERVAL, function()

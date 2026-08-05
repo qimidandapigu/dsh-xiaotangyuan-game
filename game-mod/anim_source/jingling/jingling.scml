@@ -2,10 +2,7 @@
 <spriter_data generator="Codex" generator_version="1" scml_version="1.0">
     <folder id="0" name="">
         <file id="0" name="jingling_front.png" width="222" height="444" pivot_x="0.5" pivot_y="0.08"/>
-        <file id="1" name="jingling_left.png" width="222" height="444" pivot_x="0.5" pivot_y="0.08"/>
-        <file id="2" name="jingling_right.png" width="222" height="444" pivot_x="0.5" pivot_y="0.08"/>
-        <file id="3" name="jingling_back.png" width="222" height="444" pivot_x="0.5" pivot_y="0.08"/>
-        <file id="4" name="jingling_blink.png" width="222" height="444" pivot_x="0.5" pivot_y="0.08"/>
+        <file id="1" name="jingling_blink.png" width="222" height="444" pivot_x="0.5" pivot_y="0.08"/>
     </folder>
     <entity id="0" name="jingling">
         <animation id="0" name="BUILD" length="1" looping="true">
@@ -28,7 +25,7 @@
                 <key id="0"><object folder="0" file="0" x="0" y="0"/></key>
                 <key id="1" time="1000"><object folder="0" file="0" x="0" y="14"/></key>
                 <key id="2" time="2000"><object folder="0" file="0" x="0" y="0"/></key>
-                <key id="3" time="2500"><object folder="0" file="4" x="0" y="7"/></key>
+                <key id="3" time="2500"><object folder="0" file="1" x="0" y="7"/></key>
                 <key id="4" time="3000"><object folder="0" file="0" x="0" y="14"/></key>
                 <key id="5" time="3500"><object folder="0" file="0" x="0" y="7"/></key>
             </timeline>
@@ -39,13 +36,9 @@
                 <key id="1" time="300"><object_ref id="0" timeline="0" key="1" z_index="0"/></key>
             </mainline>
             <timeline id="0" name="body">
-                <key id="0"><object folder="0" file="1" x="0" y="0"/></key>
-                <key id="1" time="300"><object folder="0" file="2" x="0" y="4"/></key>
+                <key id="0"><object folder="0" file="0" x="0" y="0"/></key>
+                <key id="1" time="300"><object folder="0" file="0" x="0" y="4"/></key>
             </timeline>
-        </animation>
-        <animation id="3" name="back" length="1000" looping="true">
-            <mainline><key id="0"><object_ref id="0" timeline="0" key="0" z_index="0"/></key></mainline>
-            <timeline id="0" name="body"><key id="0"><object folder="0" file="3" x="0" y="0"/></key></timeline>
         </animation>
     </entity>
 </spriter_data>
