@@ -1,7 +1,7 @@
 name = "Don't Starve AI Mod"
 description = "Press V to talk with Chester through the desktop AI sidecar."
 author = "Don't Starve AI Mod contributors"
-version = "0.2.0"
+version = "0.2.1"
 
 api_version = 10
 dst_compatible = true
@@ -60,6 +60,28 @@ configuration_options = {
             choice("开启", true),
         },
         default = false,
+    },
+    {
+        name = "chester_throw_enabled",
+        label = "精灵抛掷攻击",
+        hover = "按 G 键让精灵朝鼠标方向发动攻击。更改后重启世界生效。",
+        options = {
+            choice("关闭", false),
+            choice("开启（默认）", true),
+        },
+        default = true,
+    },
+    {
+        name = "chester_throw_damage",
+        label = "精灵抛掷伤害",
+        hover = "设置精灵抛掷命中生物时造成的伤害。更改后重启世界生效。",
+        options = {
+            choice("低（20）", 20),
+            choice("普通（34，默认）", 34),
+            choice("高（50）", 50),
+            choice("很高（70）", 70),
+        },
+        default = 34,
     },
     {
         name = "reminder_health",

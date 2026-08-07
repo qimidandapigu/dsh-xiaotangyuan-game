@@ -25,6 +25,7 @@ local LUA_LOG_PATH = "unsafedata/dont_starve_ai_mod_lua.txt"
 local RPC_NAMESPACE = "dont_starve_ai_mod"
 local STATE_VERSION = 2
 local VOICE_KEY = GLOBAL.KEY_V or 118
+local THROW_KEY = GLOBAL.KEY_G or 103
 local CHESTER_SLOT_COUNTS = { [9] = true, [18] = true, [27] = true, [36] = true }
 local CHESTER_SLOTS = tonumber(GetModConfigData("chester_slots")) or 9
 if not CHESTER_SLOT_COUNTS[CHESTER_SLOTS] then
@@ -39,6 +40,31 @@ local CHESTER_REVIVE_ORBIT_RADIUS = 2
 local CHESTER_REVIVE_ORBIT_INTERVAL = 0.25
 local CHESTER_SOUL_RUSH_SPEED = 16
 local CHESTER_SOUL_RUSH_DISTANCE = 2.5
+local CHESTER_THROW_ENABLED = GetModConfigData("chester_throw_enabled") ~= false
+local CHESTER_THROW_DAMAGE = tonumber(GetModConfigData("chester_throw_damage")) or 34
+CHESTER_THROW_DAMAGE = math.max(1, math.min(CHESTER_THROW_DAMAGE, 100))
+local CHESTER_THROW_DISTANCE = 10
+local CHESTER_THROW_DURATION = 0.6
+local CHESTER_THROW_COOLDOWN = 2
+local CHESTER_THROW_STRIKE_CHANCE = 0.3
+local CHESTER_THROW_LAUNCH_LINES = {
+    "看招！",
+    "精灵快递，出发！",
+    "接住这一击！",
+    "小心天外来客！",
+}
+local CHESTER_THROW_HIT_LINES = {
+    "命中！",
+    "正中目标！",
+    "这一击漂亮！",
+    "别小看精灵！",
+}
+local CHESTER_THROW_STRIKE_LINES = {
+    "今天不想上班……",
+    "罢工一分钟！",
+    "我的翅膀要休息！",
+    "这次你自己来吧！",
+}
 -- Only use recall as an emergency recovery for a genuinely stranded Chester.
 -- Normal following is handled by the tuned behaviour-tree node below.
 local CHESTER_RECALL_DISTANCE = 48
@@ -63,6 +89,7 @@ local REMINDER_BOSS_RADIUS = 24
 local last_reply_id = ""
 local voice_key_down = false
 local key_handlers_installed = false
+local throw_key_down = false
 local status_panel_key_down = false
 local status_panel_key_handlers_installed = false
 local status_panel_visible = false
@@ -560,6 +587,132 @@ local function rush_chester_to_ghost(player)
     player._chester_ai_soul_rush = rush
 end
 
+local function throw_chester(player, target_x, target_z)
+    if not CHESTER_THROW_ENABLED
+        or player == nil
+        or player.Transform == nil
+        or player:HasTag("playerghost")
+        or player:HasTag("reviving")
+        or type(target_x) ~= "number"
+        or type(target_z) ~= "number" then
+        return
+    end
+
+    local now = GLOBAL.GetTime()
+    if player._chester_ai_throw_ready_at ~= nil and now < player._chester_ai_throw_ready_at then
+        return
+    end
+
+    local chester = ensure_player_chester(player)
+    local locomotor = chester ~= nil and chester.components ~= nil and chester.components.locomotor or nil
+    if chester == nil or chester.Transform == nil or locomotor == nil or chester._chester_ai_throwing then
+        return
+    end
+
+    if math.random() < CHESTER_THROW_STRIKE_CHANCE then
+        player._chester_ai_throw_ready_at = now + 0.6
+        if chester.components.talker ~= nil then
+            chester.components.talker:Say(
+                CHESTER_THROW_STRIKE_LINES[math.random(#CHESTER_THROW_STRIKE_LINES)],
+                1.8,
+                nil,
+                true
+            )
+        end
+        return
+    end
+
+    player._chester_ai_throw_ready_at = now + CHESTER_THROW_COOLDOWN
+    chester._chester_ai_throwing = true
+    chester:StopBrain("jingling_throw")
+    locomotor:SetExternalSpeedMultiplier(chester, "jingling_throw", 3)
+
+    local player_x, player_y, player_z = player.Transform:GetWorldPosition()
+    local dx = target_x - player_x
+    local dz = target_z - player_z
+    local length = math.sqrt(dx * dx + dz * dz)
+    if length < 0.1 then
+        player._chester_ai_throw_ready_at = nil
+        locomotor:RemoveExternalSpeedMultiplier(chester, "jingling_throw")
+        chester._chester_ai_throwing = nil
+        chester:RestartBrain("jingling_throw")
+        return
+    end
+    local destination = GLOBAL.Vector3(
+        player_x + dx / length * CHESTER_THROW_DISTANCE,
+        player_y,
+        player_z + dz / length * CHESTER_THROW_DISTANCE
+    )
+    locomotor:GoToPoint(destination, nil, true)
+    if chester.components.talker ~= nil then
+        chester.components.talker:Say(
+            CHESTER_THROW_LAUNCH_LINES[math.random(#CHESTER_THROW_LAUNCH_LINES)],
+            1.5,
+            nil,
+            true
+        )
+    end
+
+    local finished = false
+    local throw_task = nil
+    local function finish_throw()
+        if finished then
+            return
+        end
+        finished = true
+        if throw_task ~= nil then
+            throw_task:Cancel()
+            throw_task = nil
+        end
+        if chester:IsValid() then
+            locomotor:Stop()
+            locomotor:RemoveExternalSpeedMultiplier(chester, "jingling_throw")
+            chester._chester_ai_throwing = nil
+            chester:RestartBrain("jingling_throw")
+        end
+    end
+
+    local elapsed = 0
+    throw_task = chester:DoPeriodicTask(0.05, function()
+        if finished or not chester:IsValid() then
+            finish_throw()
+            return
+        end
+        elapsed = elapsed + 0.05
+        local x, y, z = chester.Transform:GetWorldPosition()
+        local targets = GLOBAL.TheSim:FindEntities(
+            x,
+            y,
+            z,
+            1.2,
+            nil,
+            { "INLIMBO", "FX", "player", "playerghost", "chester" }
+        )
+        for _, target in pairs(targets) do
+            local health = target.components ~= nil and target.components.health or nil
+            local combat = target.components ~= nil and target.components.combat or nil
+            if target ~= chester and health ~= nil and not health:IsDead() and combat ~= nil then
+                -- Attribute the hit to the owner so hostile creatures pursue
+                -- the player, not the invulnerable companion that delivered it.
+                combat:GetAttacked(player, CHESTER_THROW_DAMAGE)
+                if chester.components.talker ~= nil then
+                    chester.components.talker:Say(
+                        CHESTER_THROW_HIT_LINES[math.random(#CHESTER_THROW_HIT_LINES)],
+                        1.5,
+                        nil,
+                        true
+                    )
+                end
+                finish_throw()
+                return
+            end
+        end
+        if elapsed >= CHESTER_THROW_DURATION then
+            finish_throw()
+        end
+    end)
+end
+
 local function recall_player_chester(player, reason, force)
     if player == nil or player.Transform == nil then
         return
@@ -987,6 +1140,10 @@ AddModRPCHandler(RPC_NAMESPACE, "chester_status", function(player, status)
     end
 end)
 
+AddModRPCHandler(RPC_NAMESPACE, "chester_throw", function(player, target_x, target_z)
+    throw_chester(player, target_x, target_z)
+end)
+
 local function send_status(status)
     local rpc_namespace = MOD_RPC ~= nil and MOD_RPC[RPC_NAMESPACE] or nil
     local rpc = rpc_namespace ~= nil and rpc_namespace["chester_status"] or nil
@@ -1001,6 +1158,34 @@ local function send_status(status)
     else
         diagnostic("status RPC failed: " .. tostring(error_message))
     end
+end
+
+local function send_chester_throw(target_x, target_z)
+    local rpc_namespace = MOD_RPC ~= nil and MOD_RPC[RPC_NAMESPACE] or nil
+    local rpc = rpc_namespace ~= nil and rpc_namespace["chester_throw"] or nil
+    if rpc == nil then
+        diagnostic("throw RPC unavailable")
+        return
+    end
+    local ok, error_message = pcall(SendModRPCToServer, rpc, target_x, target_z)
+    if not ok then
+        diagnostic("throw RPC failed: " .. tostring(error_message))
+    end
+end
+
+local function on_throw_key_down()
+    if throw_key_down or GLOBAL.ThePlayer == nil or is_player_in_revival(GLOBAL.ThePlayer) then
+        return
+    end
+    throw_key_down = true
+    local target = GLOBAL.TheInput ~= nil and GLOBAL.TheInput:GetWorldPosition() or nil
+    if target ~= nil then
+        send_chester_throw(target.x, target.z)
+    end
+end
+
+local function on_throw_key_up()
+    throw_key_down = false
 end
 
 local function on_voice_key_down()
@@ -1069,7 +1254,7 @@ local function install_voice_key_handlers()
         return false
     end
 
-    diagnostic("installing V handlers: key=" .. tostring(VOICE_KEY))
+    diagnostic("installing V/G handlers")
     local ok_down, down_error = pcall(
         GLOBAL.TheInput.AddKeyDownHandler,
         GLOBAL.TheInput,
@@ -1082,17 +1267,30 @@ local function install_voice_key_handlers()
         VOICE_KEY,
         on_voice_key_up
     )
-    if not ok_down or not ok_up then
+    local ok_throw_down, throw_down_error = pcall(
+        GLOBAL.TheInput.AddKeyDownHandler,
+        GLOBAL.TheInput,
+        THROW_KEY,
+        on_throw_key_down
+    )
+    local ok_throw_up, throw_up_error = pcall(
+        GLOBAL.TheInput.AddKeyUpHandler,
+        GLOBAL.TheInput,
+        THROW_KEY,
+        on_throw_key_up
+    )
+    if not ok_down or not ok_up or not ok_throw_down or not ok_throw_up then
         diagnostic(
-            "key handler install failed: down=" .. tostring(down_error)
-                .. "; up=" .. tostring(up_error)
+            "key handler install failed: voice_down=" .. tostring(down_error)
+                .. "; voice_up=" .. tostring(up_error)
+                .. "; throw_down=" .. tostring(throw_down_error)
+                .. "; throw_up=" .. tostring(throw_up_error)
         )
         return false
     end
 
     key_handlers_installed = true
-    diagnostic("V key handlers installed successfully; down=" .. tostring(ok_down)
-        .. "; up=" .. tostring(ok_up))
+    diagnostic("V/G key handlers installed successfully")
     return true
 end
 
