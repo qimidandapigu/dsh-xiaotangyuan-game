@@ -47,6 +47,9 @@ local CHESTER_THROW_DISTANCE = 10
 local CHESTER_THROW_DURATION = 0.6
 local CHESTER_THROW_COOLDOWN = 2
 local CHESTER_THROW_STRIKE_CHANCE = 0.3
+local JINGLING_VISUAL_IDLE = 0
+local JINGLING_VISUAL_THROW = 1
+local JINGLING_VISUAL_STRIKE = 2
 local CHESTER_THROW_LAUNCH_LINES = {
     "看招！",
     "精灵快递，出发！",
@@ -230,6 +233,21 @@ end
 
 local function is_player_in_revival(player)
     return player ~= nil and player:HasTag("playerghost")
+end
+
+local function set_jingling_visual_mode(chester, mode, duration)
+    local visual_mode = chester ~= nil and chester._jingling_visual_mode or nil
+    if visual_mode == nil then
+        return
+    end
+    visual_mode:set(mode)
+    if duration ~= nil and duration > 0 then
+        chester:DoTaskInTime(duration, function()
+            if chester:IsValid() and visual_mode:value() == mode then
+                visual_mode:set(JINGLING_VISUAL_IDLE)
+            end
+        end)
+    end
 end
 
 local function round(value, places)
@@ -611,6 +629,7 @@ local function throw_chester(player, target_x, target_z)
 
     if math.random() < CHESTER_THROW_STRIKE_CHANCE then
         player._chester_ai_throw_ready_at = now + 0.6
+        set_jingling_visual_mode(chester, JINGLING_VISUAL_STRIKE, 0.7)
         if chester.components.talker ~= nil then
             chester.components.talker:Say(
                 CHESTER_THROW_STRIKE_LINES[math.random(#CHESTER_THROW_STRIKE_LINES)],
@@ -624,6 +643,7 @@ local function throw_chester(player, target_x, target_z)
 
     player._chester_ai_throw_ready_at = now + CHESTER_THROW_COOLDOWN
     chester._chester_ai_throwing = true
+    set_jingling_visual_mode(chester, JINGLING_VISUAL_THROW, CHESTER_THROW_DURATION)
     chester:StopBrain("jingling_throw")
     locomotor:SetExternalSpeedMultiplier(chester, "jingling_throw", 3)
 
@@ -1509,7 +1529,26 @@ local function install_jingling_visual(inst)
     visual.DynamicShadow:SetSize(1.15, 0.55)
 
     local active_animation = "idle"
+    local active_mode = JINGLING_VISUAL_IDLE
+    local function update_jingling_visual_mode()
+        local mode = inst._jingling_visual_mode ~= nil and inst._jingling_visual_mode:value()
+            or JINGLING_VISUAL_IDLE
+        if mode == active_mode then
+            return
+        end
+        active_mode = mode
+        if mode == JINGLING_VISUAL_THROW then
+            visual.AnimState:PlayAnimation("throw", false)
+        elseif mode == JINGLING_VISUAL_STRIKE then
+            visual.AnimState:PlayAnimation("strike", false)
+        else
+            active_animation = ""
+        end
+    end
     local function update_jingling_motion()
+        if active_mode ~= JINGLING_VISUAL_IDLE then
+            return
+        end
         local moving = inst.sg ~= nil and inst.sg:HasStateTag("moving")
         local next_animation = moving and "walk_loop" or "idle"
         if next_animation ~= active_animation then
@@ -1522,6 +1561,11 @@ local function install_jingling_visual(inst)
     -- emit a locomote event on a remote client.
     inst:DoPeriodicTask(0.15, update_jingling_motion)
     inst:ListenForEvent("locomote", update_jingling_motion)
+    inst:ListenForEvent("chester_ai_visual_modedirty", update_jingling_visual_mode)
+    inst:DoTaskInTime(0, function()
+        update_jingling_visual_mode()
+        update_jingling_motion()
+    end)
 
     -- The base Chester continues to own collisions and all gameplay state but
     -- is no longer rendered underneath the rabbit companion.
@@ -1537,6 +1581,11 @@ end
 
 AddPrefabPostInit("chester", function(inst)
     configure_chester_light(inst)
+    inst._jingling_visual_mode = GLOBAL.net_tinybyte(
+        inst.GUID,
+        "chester_ai_visual_mode",
+        "chester_ai_visual_modedirty"
+    )
     install_jingling_visual(inst)
 
     inst._chester_ai_slots = GLOBAL.net_tinybyte(
@@ -1547,6 +1596,7 @@ AddPrefabPostInit("chester", function(inst)
 
     if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
         inst._chester_ai_slots:set(CHESTER_SLOTS)
+        inst._jingling_visual_mode:set(JINGLING_VISUAL_IDLE)
     else
         local function synchronize_chester_container_ui(chester)
             local slots = chester._chester_ai_slots:value()
