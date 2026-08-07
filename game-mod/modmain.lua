@@ -33,10 +33,18 @@ end
 local CHESTER_LIGHT_ENABLED = GetModConfigData("chester_light_enabled") == true
 local CHESTER_LIGHT_RADIUS = tonumber(GetModConfigData("chester_light_radius")) or 3
 CHESTER_LIGHT_RADIUS = math.max(1, math.min(CHESTER_LIGHT_RADIUS, 5))
--- Vanilla Chester follows at roughly 6 units but may stretch out to 12. Keep
--- the companion visibly close when pathing cannot catch up with the player.
-local CHESTER_RECALL_DISTANCE = 8
-local CHESTER_FOLLOW_CHECK_INTERVAL = 2
+local CHESTER_AUTO_REVIVE_ENABLED = GetModConfigData("chester_auto_revive") == true
+local CHESTER_AUTO_REVIVE_DELAY = 3
+local CHESTER_REVIVE_ORBIT_RADIUS = 2
+local CHESTER_REVIVE_ORBIT_INTERVAL = 0.25
+local CHESTER_SOUL_RUSH_SPEED = 16
+local CHESTER_SOUL_RUSH_DISTANCE = 2.5
+-- Only use recall as an emergency recovery for a genuinely stranded Chester.
+-- Normal following is handled by the tuned behaviour-tree node below.
+local CHESTER_RECALL_DISTANCE = 48
+local CHESTER_FOLLOW_CHECK_INTERVAL = 10
+local CHESTER_FOLLOW_TARGET_DISTANCE = 2
+local CHESTER_FOLLOW_START_DISTANCE = 5
 local STATUS_PANEL_KEY = GLOBAL.KEY_F8 or 119
 local REMINDER_HEALTH_ENABLED = GetModConfigData("reminder_health") ~= false
 local REMINDER_HUNGER_ENABLED = GetModConfigData("reminder_hunger") ~= false
@@ -147,6 +155,40 @@ local function keep_chester_awake(inst)
     end
 end
 
+local function configure_chester_follow_distance(brain)
+    -- Chester's stock brain waits until it is 12 units away before following.
+    -- Tune its existing Follow node instead of replacing the whole brain, so
+    -- its normal panic and facing behaviour remain unchanged.
+    local root = brain ~= nil and brain.bt ~= nil and brain.bt.root or nil
+    local function tune_follow_node(node)
+        if node == nil then
+            return false
+        end
+        if node.name == "Follow" then
+            node.min_dist = 0
+            node.target_dist = CHESTER_FOLLOW_TARGET_DISTANCE
+            node.max_dist = CHESTER_FOLLOW_START_DISTANCE
+            return true
+        end
+        if node.children ~= nil then
+            for _, child in pairs(node.children) do
+                if tune_follow_node(child) then
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    tune_follow_node(root)
+end
+
+-- This hook runs after ChesterBrain:OnStart has built the behaviour tree.
+-- It changes the normal walking trigger, rather than teleporting the entity.
+AddBrainPostInit("chesterbrain", function(brain)
+    configure_chester_follow_distance(brain)
+end)
+
 local function diagnostic(message)
     local timestamp = GLOBAL.os ~= nil and GLOBAL.os.time ~= nil and GLOBAL.os.time() or 0
     local text = tostring(message)
@@ -157,6 +199,10 @@ local function diagnostic(message)
         file:write("[" .. tostring(timestamp) .. "] " .. text .. "\n")
         file:close()
     end
+end
+
+local function is_player_in_revival(player)
+    return player ~= nil and player:HasTag("playerghost")
 end
 
 local function round(value, places)
@@ -383,8 +429,145 @@ local function ensure_player_chester(player)
     return chester
 end
 
+local function cancel_chester_auto_revive(player)
+    local task = player ~= nil and player._chester_ai_revive_task or nil
+    if task ~= nil then
+        task:Cancel()
+        player._chester_ai_revive_task = nil
+    end
+end
+
+local function start_chester_auto_revive(player)
+    if not CHESTER_AUTO_REVIVE_ENABLED
+        or player == nil
+        or not player:HasTag("playerghost") then
+        return
+    end
+
+    cancel_chester_auto_revive(player)
+    local chester = ensure_player_chester(player)
+    if chester == nil or chester.Transform == nil then
+        return
+    end
+
+    local elapsed = 0
+    local spoke_midway = false
+    local talker = chester.components ~= nil and chester.components.talker or nil
+    local locomotor = chester.components ~= nil and chester.components.locomotor or nil
+    if talker ~= nil then
+        talker:Say("星辉回响，灵魂归来！", 2, nil, true)
+    end
+    local task = nil
+    task = chester:DoPeriodicTask(CHESTER_REVIVE_ORBIT_INTERVAL, function()
+        if not player:IsValid()
+            or not player:HasTag("playerghost")
+            or player:HasTag("reviving")
+            or not chester:IsValid()
+            or chester.Transform == nil then
+            if locomotor ~= nil then
+                locomotor:Stop()
+            end
+            cancel_chester_auto_revive(player)
+            return
+        end
+
+        elapsed = elapsed + CHESTER_REVIVE_ORBIT_INTERVAL
+        local x, y, z = player.Transform:GetWorldPosition()
+        local angle = elapsed * 2.5
+        local orbit_target = GLOBAL.Vector3(
+            x + math.cos(angle) * CHESTER_REVIVE_ORBIT_RADIUS,
+            y,
+            z + math.sin(angle) * CHESTER_REVIVE_ORBIT_RADIUS
+        )
+        -- Move through the normal locomotor instead of snapping positions,
+        -- which keeps the orbit smooth for every client.
+        if locomotor ~= nil then
+            locomotor:GoToPoint(orbit_target, nil, true)
+        end
+
+        if not spoke_midway and elapsed >= CHESTER_AUTO_REVIVE_DELAY / 2 then
+            spoke_midway = true
+            if talker ~= nil then
+                talker:Say("月光为引，生命苏醒！", 2, nil, true)
+            end
+        end
+
+        if elapsed >= CHESTER_AUTO_REVIVE_DELAY then
+            if locomotor ~= nil then
+                locomotor:Stop()
+            end
+            if talker ~= nil then
+                talker:Say("咒印完成——醒来吧！", 2, nil, true)
+            end
+            cancel_chester_auto_revive(player)
+            -- No source intentionally selects DST's standard nearby-reviver
+            -- resurrection path, including its normal ghost-to-player state.
+            player:PushEvent("respawnfromghost")
+        end
+    end)
+    player._chester_ai_revive_task = task
+end
+
+local function cancel_chester_soul_rush(player)
+    local rush = player ~= nil and player._chester_ai_soul_rush or nil
+    if rush == nil then
+        return
+    end
+    if rush.task ~= nil then
+        rush.task:Cancel()
+    end
+    if rush.locomotor ~= nil and rush.original_runspeed ~= nil then
+        rush.locomotor.runspeed = rush.original_runspeed
+    end
+    player._chester_ai_soul_rush = nil
+end
+
+local function rush_chester_to_ghost(player)
+    if player == nil or not player:HasTag("playerghost") then
+        return
+    end
+
+    cancel_chester_soul_rush(player)
+    local chester = ensure_player_chester(player)
+    local locomotor = chester ~= nil and chester.components ~= nil and chester.components.locomotor or nil
+    if chester == nil or locomotor == nil then
+        return
+    end
+
+    local rush = {
+        locomotor = locomotor,
+        original_runspeed = locomotor.runspeed,
+    }
+    locomotor.runspeed = math.max(locomotor.runspeed or 0, CHESTER_SOUL_RUSH_SPEED)
+    rush.task = chester:DoPeriodicTask(0.2, function()
+        if not player:IsValid()
+            or not player:HasTag("playerghost")
+            or not chester:IsValid()
+            or chester.Transform == nil then
+            cancel_chester_soul_rush(player)
+            return
+        end
+
+        if chester:GetDistanceSqToInst(player) <= CHESTER_SOUL_RUSH_DISTANCE * CHESTER_SOUL_RUSH_DISTANCE then
+            locomotor:Stop()
+            cancel_chester_soul_rush(player)
+            start_chester_auto_revive(player)
+            return
+        end
+
+        locomotor:GoToPoint(player:GetPosition(), nil, true)
+    end)
+    player._chester_ai_soul_rush = rush
+end
+
 local function recall_player_chester(player, reason, force)
     if player == nil or player.Transform == nil then
+        return
+    end
+
+    -- A ghost is handled by rush_chester_to_ghost so the companion runs to it
+    -- instead of being teleported by the stranded-follower safety net.
+    if player:HasTag("playerghost") then
         return
     end
 
@@ -773,6 +956,9 @@ local function ensure_request_document()
 end
 
 local function show_chester_status(player, status)
+    if is_player_in_revival(player) then
+        return
+    end
     local chester = find_chester_near_player(player)
     if chester == nil then
         diagnostic("cannot show " .. status .. ": no Chester within 80 units")
@@ -825,6 +1011,9 @@ local function on_voice_key_down()
     if voice_key_down or GLOBAL.ThePlayer == nil then
         return
     end
+    if is_player_in_revival(GLOBAL.ThePlayer) then
+        return
+    end
 
     -- Shift+V retries the most recently recognised question without opening
     -- the microphone, so it does not conflict with normal hold-V recording.
@@ -856,6 +1045,9 @@ local function on_voice_key_up()
     end
 
     voice_key_down = false
+    if is_player_in_revival(GLOBAL.ThePlayer) then
+        return
+    end
     local written, write_error = write_recording_request("stop_recording")
     diagnostic(
         "stop_recording request: written=" .. tostring(written)
@@ -927,6 +1119,11 @@ local function show_reply()
     end
     if chester == nil then
         diagnostic("cannot show Python reply: no Chester for recipient=" .. tostring(recipient_userid))
+        return
+    end
+    local follower = chester.components ~= nil and chester.components.follower or nil
+    if follower ~= nil and is_player_in_revival(follower:GetLeader()) then
+        diagnostic("suppressed Python reply while Chester is reviving its owner")
         return
     end
     if chester.components == nil or chester.components.talker == nil then
@@ -1263,10 +1460,12 @@ AddPlayerPostInit(function(player)
     -- lets the game's ghost/resurrection placement finish first.
     player:ListenForEvent("ms_becameghost", function()
         player:DoTaskInTime(1, function()
-            recall_player_chester(player, "player_died", true)
+            rush_chester_to_ghost(player)
         end)
     end)
     player:ListenForEvent("ms_respawnedfromghost", function()
+        cancel_chester_auto_revive(player)
+        cancel_chester_soul_rush(player)
         player:DoTaskInTime(1, function()
             recall_player_chester(player, "player_revived", true)
         end)

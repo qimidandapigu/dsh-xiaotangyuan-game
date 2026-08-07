@@ -52,6 +52,16 @@ configuration_options = {
         default = 3,
     },
     {
+        name = "chester_auto_revive",
+        label = "精灵自动复活",
+        hover = "玩家变成鬼魂后，精灵绕其盘旋 3 秒并自动复活。更改后重启世界生效。",
+        options = {
+            choice("关闭（默认）", false),
+            choice("开启", true),
+        },
+        default = false,
+    },
+    {
         name = "reminder_health",
         label = "低血量提醒",
         hover = "生命低于 30% 时让切斯特提醒。",
