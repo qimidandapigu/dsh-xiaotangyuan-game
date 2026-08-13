@@ -68,6 +68,13 @@ local CHESTER_THROW_STRIKE_LINES = {
     "我的翅膀要休息！",
     "这次你自己来吧！",
 }
+local CHESTER_SPEECH_BUBBLE_WIDTH = 360
+local CHESTER_SPEECH_BUBBLE_OFFSET = GLOBAL.Vector3(0, -390, 0)
+local CHESTER_SPEECH_BUBBLE_PADDING = 18
+local CHESTER_SPEECH_BUBBLE_MAX_LINES = 6
+local CHESTER_SPEECH_BUBBLE_MIN_WIDTH = 110
+local CHESTER_HEAD_TEXT_WIDTH = 300
+local CHESTER_HEAD_TEXT_MAX_LINES = 6
 -- Only use recall as an emergency recovery for a genuinely stranded Chester.
 -- Normal following is handled by the tuned behaviour-tree node below.
 local CHESTER_RECALL_DISTANCE = 48
@@ -1209,10 +1216,6 @@ local function on_throw_key_up()
 end
 
 local function on_voice_key_down()
-    diagnostic(
-        "V key-down callback: already_down=" .. tostring(voice_key_down)
-            .. "; player=" .. tostring(GLOBAL.ThePlayer)
-    )
     if voice_key_down or GLOBAL.ThePlayer == nil then
         return
     end
@@ -1244,7 +1247,6 @@ local function on_voice_key_down()
 end
 
 local function on_voice_key_up()
-    diagnostic("V key-up callback: was_down=" .. tostring(voice_key_down))
     if not voice_key_down then
         return
     end
@@ -1579,6 +1581,53 @@ local function install_jingling_visual(inst)
     diagnostic("Jingling visual installed for Chester: " .. tostring(inst.GUID))
 end
 
+local function install_chester_speech_bubble(inst)
+    if inst == nil or inst.components == nil or inst.components.talker == nil then
+        return
+    end
+
+    local talker = inst.components.talker
+    -- Use DST's normal head-following text.  It is simple, stable, and does
+    -- not add a separate HUD widget or a decorative speech bubble.
+    talker.disablefollowtext = nil
+    if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
+        return
+    end
+    if inst._chester_ai_speech_bubble_installed then
+        return
+    end
+
+    inst._chester_ai_speech_bubble_installed = true
+    local old_ontalkfn = talker.ontalkfn
+    talker.ontalkfn = function(speaker, data)
+        if old_ontalkfn ~= nil then
+            old_ontalkfn(speaker, data)
+        end
+        if data ~= nil and data.message ~= nil and talker.widget ~= nil then
+            -- The original FollowText stays above Jingling's head; only use
+            -- Text's native multiline method so Chinese replies wrap cleanly.
+            talker.widget.text:SetMultilineTruncatedString(
+                data.message,
+                CHESTER_HEAD_TEXT_MAX_LINES,
+                CHESTER_HEAD_TEXT_WIDTH,
+                nil,
+                false
+            )
+            -- FollowText is positioned for one line and expands both upward
+            -- and downward when wrapped. Shift the whole block upward by its
+            -- measured height so even a long reply remains above Jingling.
+            local _, text_height = talker.widget.text:GetRegionSize()
+            talker.widget:SetScreenOffset(
+                0,
+                -- FollowText's screen Y axis is positive upward. Keep even a
+                -- one-line reply above the companion's ears; additional lines
+                -- rise by half their measured height.
+                math.max(115, text_height * 0.5 + 72)
+            )
+        end
+    end
+end
+
 AddPrefabPostInit("chester", function(inst)
     configure_chester_light(inst)
     inst._jingling_visual_mode = GLOBAL.net_tinybyte(
@@ -1631,6 +1680,7 @@ AddPrefabPostInit("chester", function(inst)
                 .. tostring(GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim)
         )
     end
+    install_chester_speech_bubble(inst)
 
     if GLOBAL.TheWorld ~= nil and GLOBAL.TheWorld.ismastersim then
         -- Chester is an AI companion, not a combat unit. Do not let hostile

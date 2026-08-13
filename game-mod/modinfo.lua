@@ -1,7 +1,7 @@
 name = "Don't Starve AI Mod"
 description = "Press V to talk with Chester through the desktop AI sidecar."
 author = "Don't Starve AI Mod contributors"
-version = "0.2.1"
+version = "0.2.14"
 
 api_version = 10
 dst_compatible = true
