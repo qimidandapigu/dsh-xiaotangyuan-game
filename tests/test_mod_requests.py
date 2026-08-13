@@ -118,6 +118,15 @@ class ModRequestTests(unittest.TestCase):
             self.assertEqual(payload["text"], "Hello")
             self.assertEqual(payload["recipient_userid"], "KU_example")
 
+    def test_writes_reply_display_duration_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reply.json"
+
+            write_reply(path, "Hello", display_duration_seconds=12.5)
+
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["display_duration_seconds"], 12.5)
+
     def test_writes_bridge_status_for_the_game_panel(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

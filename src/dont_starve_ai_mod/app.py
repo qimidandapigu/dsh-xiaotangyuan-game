@@ -11,7 +11,7 @@ from pathlib import Path
 import requests
 
 from .ai_client import AiClient
-from .audio import VoiceRecorder, play_wav
+from .audio import VoiceRecorder, play_wav, wav_duration_seconds
 from .config import Settings
 from .game_state import build_context, read_game_state, save_context
 from .screen_capture import capture_game_window, is_game_foreground
@@ -25,6 +25,7 @@ def write_reply(
     path: Path | None,
     text: str,
     recipient_userid: str | None = None,
+    display_duration_seconds: float | None = None,
 ) -> None:
     if path is None:
         LOGGER.warning("回复文件路径不可用，已跳过游戏内气泡显示")
@@ -37,6 +38,8 @@ def write_reply(
     }
     if recipient_userid:
         payload["recipient_userid"] = recipient_userid
+    if display_duration_seconds is not None:
+        payload["display_duration_seconds"] = display_duration_seconds
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     os.replace(temporary, path)
@@ -185,8 +188,19 @@ class ChesterApp:
         reply = self.ai.chat(text, screenshot, context)
         self._record_conversation_turn(text, reply)
         LOGGER.info("切斯特：%s", reply)
-        write_reply(self.settings.reply_file, reply, recipient_userid)
         wav = self.ai.synthesize(reply)
+        # Do not start the in-game text timer while TTS is still being
+        # generated.  The game polls the reply file, so reserve a small lead
+        # time before playback as well as the actual WAV duration.
+        # Leave the reply visible long enough to read after the voice finishes.
+        display_duration = max(12.0, min(60.0, wav_duration_seconds(wav) + 4.0))
+        write_reply(
+            self.settings.reply_file,
+            reply,
+            recipient_userid,
+            display_duration,
+        )
+        time.sleep(0.6)
         play_wav(wav)
         return reply
 

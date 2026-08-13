@@ -1350,7 +1350,11 @@ local function show_reply()
         diagnostic("cannot show Python reply: Chester talker component unavailable")
         return
     end
-    chester.components.talker:Say(reply.text, 8, nil, true)
+    -- The in-game Talker owns Jingling's text lifetime. Keep a generous
+    -- minimum here even when the desktop voice bridge provides no duration.
+    local display_duration = tonumber(reply.display_duration_seconds) or 16
+    display_duration = math.max(16, math.min(display_duration, 60))
+    chester.components.talker:Say(reply.text, display_duration, nil, true)
     diagnostic("Python reply shown by Chester; recipient=" .. tostring(recipient_userid))
 end
 

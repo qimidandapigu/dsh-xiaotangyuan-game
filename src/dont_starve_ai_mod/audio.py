@@ -91,3 +91,15 @@ def play_wav(wav_bytes: bytes) -> None:
                 os.unlink(path)
             except OSError:
                 pass
+
+
+def wav_duration_seconds(wav_bytes: bytes) -> float:
+    """Return a WAV clip's duration, or zero when it cannot be inspected."""
+    if not wav_bytes:
+        return 0.0
+    try:
+        with wave.open(io.BytesIO(wav_bytes), "rb") as wav:
+            frame_rate = wav.getframerate()
+            return wav.getnframes() / frame_rate if frame_rate > 0 else 0.0
+    except (EOFError, wave.Error):
+        return 0.0
