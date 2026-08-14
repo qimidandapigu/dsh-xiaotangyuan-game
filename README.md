@@ -40,7 +40,14 @@ pnpm check
 
 ## Install into a local DeepSeek Harness profile
 
-From this checkout:
+Install the published GitHub package into the Web profile:
+
+```powershell
+dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-game-agent/releases/download/v0.2.0/qimidandapigu-dsh-game-agent-0.2.0.tgz"
+dsh web
+```
+
+Or develop from this checkout:
 
 ```bash
 dsh plugin --profile game add .
@@ -51,7 +58,7 @@ If `dsh` is not installed globally, use the matching `npx @deepseek-ai/dsh@0.1.0
 
 Configure a model and credentials in DeepSeek Harness before sending chat messages. The plugin uses the profile's selected default model; it does not store a separate API key.
 
-Until the npm package is published, build this repository first and add the checkout as shown above. A release tarball can also be installed when a matching GitHub Release is available.
+The GitHub Release command above is the supported installation route until the npm package is published.
 
 ## Protocol
 
