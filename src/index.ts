@@ -5,10 +5,11 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import WebSocket, { WebSocketServer, type RawData } from 'ws'
+import { registerGameTools } from './game-tools.js'
 import { failure, parseRpcRequest, success, type RpcId, type RpcRequest } from './protocol.js'
 
 export const name = 'dsh-game-agent'
-export const inject = ['agentDefaultModel', 'agents', 'sessions']
+export const inject = ['agentDefaultModel', 'agents', 'sessions', 'tools']
 
 export interface Config {
   host?: string
@@ -254,6 +255,8 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     throw new Error('port must be an integer between 1024 and 65535')
   }
+
+  registerGameTools(ctx)
 
   ctx.effect(() => {
     const gateway = new GameGateway(ctx, host, port)

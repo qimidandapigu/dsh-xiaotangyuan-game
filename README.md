@@ -12,7 +12,22 @@ Stardew Valley SMAPI mod
   -> reply shown inside Stardew Valley
 ```
 
-The gateway binds only to loopback. Version `0.1.0` supports complete text replies; token streaming and game tools are intentionally deferred.
+The gateway binds only to loopback. Version `0.2.0` supports complete text replies plus automatic Stardew Valley MOD detection and installation; token streaming and in-game action tools are deferred.
+
+## Install the Stardew MOD through conversation
+
+Once this plugin is loaded, tell DeepSeek Harness:
+
+```text
+帮我安装星露谷 AI MOD
+```
+
+The model can call two native tools:
+
+- `game_mod_detect`: finds Steam's Stardew Valley directory, SMAPI, and the installed MOD version.
+- `game_mod_install`: downloads the latest `stardew-agent-mod` GitHub Release through the GitHub asset API, verifies `SHA256SUMS.txt`, backs up an existing copy, installs it, and verifies its manifest.
+
+The install tool only runs after an explicit installation request. SMAPI must already be installed. Windows is currently verified; macOS and common Linux Steam locations are searched on a best-effort basis. `gamePath` can be supplied when automatic detection fails.
 
 ## Develop
 
@@ -35,6 +50,8 @@ dsh --profile game
 If `dsh` is not installed globally, use the matching `npx @deepseek-ai/dsh@0.1.0-rc.6 ...` command. DeepSeek Harness is currently a developer preview, so this plugin pins its tested API generation to `0.1.0-rc.6`.
 
 Configure a model and credentials in DeepSeek Harness before sending chat messages. The plugin uses the profile's selected default model; it does not store a separate API key.
+
+Until the npm package is published, build this repository first and add the checkout as shown above. A release tarball can also be installed when a matching GitHub Release is available.
 
 ## Protocol
 
