@@ -15,7 +15,8 @@ The Harness plugin contains the gateway, installer tools, and game integration l
 ## Repository layout
 
 ```text
-src/                       DeepSeek Harness plugin and installers
+src/                       DeepSeek Harness plugin and shared runtime
+src/games/stardew-valley/  Harness-side detection and installation
 test/                      TypeScript tests
 games/stardew-valley/      Stardew Valley SMAPI MOD source
 ```
@@ -28,6 +29,8 @@ Additional games will be added under `games/` without creating another repositor
 dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.3.0/qimidandapigu-dsh-xiaotangyuan-game-0.3.0.tgz"
 dsh web
 ```
+
+If the earlier `@qimidandapigu/dsh-game-agent` package is installed, remove it before adding this renamed package so that two gateways do not compete for port `32145`.
 
 Then tell DeepSeek Harness:
 

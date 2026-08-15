@@ -2,7 +2,11 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { inspectStardewPath, parseSteamLibraryPaths, selectStardewRelease } from '../src/stardew-installer.js'
+import {
+  inspectStardewPath,
+  parseSteamLibraryPaths,
+  selectStardewRelease,
+} from '../src/games/stardew-valley/installer.js'
 
 const temporaryPaths: string[] = []
 
