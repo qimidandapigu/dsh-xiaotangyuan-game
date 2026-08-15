@@ -1,7 +1,7 @@
 {
-  "name": "@qimidandapigu/dsh-game-agent",
-  "version": "0.2.0",
-  "description": "DeepSeek Harness plugin that connects game mods to a model-backed game agent.",
+  "name": "@qimidandapigu/dsh-xiaotangyuan-game",
+  "version": "0.3.0",
+  "description": "XiaoTangYuan game AI integration for DeepSeek Harness.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -27,12 +27,17 @@
   "keywords": [
     "deepseek-harness",
     "dsh-plugin",
+    "xiaotangyuan",
+    "game-ai",
     "game-agent",
     "stardew-valley"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/qimidandapigu/dsh-game-agent.git"
+    "url": "git+https://github.com/qimidandapigu/dsh-xiaotangyuan-game.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "MIT",
   "engines": {

@@ -3,3 +3,8 @@ dist/
 coverage/
 *.log
 .env
+**/bin/
+**/obj/
+**/*.user
+**/*.suo
+**/.vs/
