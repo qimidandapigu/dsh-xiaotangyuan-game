@@ -17,7 +17,9 @@ import { promisify } from 'node:util'
 import extract from 'extract-zip'
 
 const execFileAsync = promisify(execFile)
-const RELEASE_API = 'https://api.github.com/repos/qimidandapigu/stardew-agent-mod/releases/latest'
+const RELEASES_API = 'https://api.github.com/repos/qimidandapigu/dsh-xiaotangyuan-game/releases?per_page=50'
+const STARDEW_RELEASE_PREFIX = 'stardew-v'
+const STARDEW_ASSET_PREFIX = 'dsh-xiaotangyuan-game-stardew-'
 const MOD_FOLDER_NAME = 'StardewAgentMod'
 
 interface ReleaseAsset {
@@ -26,9 +28,10 @@ interface ReleaseAsset {
   size: number
 }
 
-interface GithubRelease {
+export interface GithubRelease {
   tag_name: string
   assets: ReleaseAsset[]
+  draft?: boolean
 }
 
 interface ModManifest {
@@ -177,7 +180,7 @@ async function fetchChecked(
         signal,
         headers: {
           Accept: accept,
-          'User-Agent': 'dsh-game-agent',
+          'User-Agent': 'dsh-xiaotangyuan-game',
           'X-GitHub-Api-Version': '2022-11-28',
         },
       })
@@ -196,12 +199,23 @@ async function fetchChecked(
   throw lastError instanceof Error ? lastError : new Error(`download failed for ${url}`)
 }
 
+export function selectStardewRelease(value: unknown): GithubRelease {
+  if (!Array.isArray(value)) throw new Error('GitHub returned an invalid release list')
+  const release = value.find((candidate): candidate is GithubRelease => {
+    if (typeof candidate !== 'object' || candidate === null) return false
+    const record = candidate as Partial<GithubRelease>
+    return record.draft !== true
+      && typeof record.tag_name === 'string'
+      && record.tag_name.startsWith(STARDEW_RELEASE_PREFIX)
+      && Array.isArray(record.assets)
+  })
+  if (release === undefined) throw new Error('no Stardew Valley release was found in the XiaoTangYuan repository')
+  return release
+}
+
 async function latestRelease(signal: AbortSignal): Promise<GithubRelease> {
-  const value = await (await fetchChecked(RELEASE_API, signal)).json() as Partial<GithubRelease>
-  if (typeof value.tag_name !== 'string' || !Array.isArray(value.assets)) {
-    throw new Error('GitHub returned an invalid Stardew Agent Mod release')
-  }
-  return { tag_name: value.tag_name, assets: value.assets as ReleaseAsset[] }
+  const value: unknown = await (await fetchChecked(RELEASES_API, signal)).json()
+  return selectStardewRelease(value)
 }
 
 function safeChild(parent: string, child: string): void {
@@ -232,14 +246,14 @@ export async function installStardewMod(
   }
 
   const release = await latestRelease(signal)
-  const zipAsset = release.assets.find(asset => asset.name.startsWith('StardewAgentMod') && asset.name.endsWith('.zip'))
+  const zipAsset = release.assets.find(asset => asset.name.startsWith(STARDEW_ASSET_PREFIX) && asset.name.endsWith('.zip'))
   const checksumAsset = release.assets.find(asset => asset.name === 'SHA256SUMS.txt')
   if (zipAsset === undefined || checksumAsset === undefined) {
-    throw new Error('latest Stardew Agent Mod release is missing its zip or SHA256SUMS.txt')
+    throw new Error('latest XiaoTangYuan Stardew release is missing its zip or SHA256SUMS.txt')
   }
   if (zipAsset.size > 50 * 1024 * 1024) throw new Error('refusing MOD archive larger than 50 MiB')
 
-  const tempRoot = await mkdtemp(join(tmpdir(), 'dsh-game-agent-'))
+  const tempRoot = await mkdtemp(join(tmpdir(), 'dsh-xiaotangyuan-game-'))
   try {
     const archivePath = join(tempRoot, basename(zipAsset.name))
     const archive = new Uint8Array(await (await fetchChecked(zipAsset.url, signal, 'application/octet-stream')).arrayBuffer())

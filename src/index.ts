@@ -8,7 +8,7 @@ import WebSocket, { WebSocketServer, type RawData } from 'ws'
 import { registerGameTools } from './game-tools.js'
 import { failure, parseRpcRequest, success, type RpcId, type RpcRequest } from './protocol.js'
 
-export const name = 'dsh-game-agent'
+export const name = 'dsh-xiaotangyuan-game'
 export const inject = ['agentDefaultModel', 'agents', 'sessions', 'tools']
 
 export interface Config {
@@ -133,10 +133,10 @@ class GameGateway {
     this.server = new WebSocketServer({ host, port, maxPayload: 1024 * 1024 })
     this.server.on('connection', socket => this.onConnection(socket))
     this.server.on('listening', () => {
-      console.info(`[dsh-game-agent] listening on ws://${host}:${port}`)
+      console.info(`[dsh-xiaotangyuan-game] listening on ws://${host}:${port}`)
     })
     this.server.on('error', error => {
-      console.error('[dsh-game-agent] WebSocket server error', error)
+      console.error('[dsh-xiaotangyuan-game] WebSocket server error', error)
     })
   }
 
@@ -153,13 +153,13 @@ class GameGateway {
       state.queue = state.queue
         .then(() => this.onMessage(state, data))
         .catch(error => {
-          console.error('[dsh-game-agent] request processing failed', error)
+          console.error('[dsh-xiaotangyuan-game] request processing failed', error)
         })
     })
     socket.on('close', () => {
       this.connections.delete(state)
       void state.handle?.dispose().catch(error => {
-        console.error('[dsh-game-agent] failed to dispose game agent', error)
+        console.error('[dsh-xiaotangyuan-game] failed to dispose game agent', error)
       })
     })
   }
@@ -250,7 +250,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   const host = config.host ?? '127.0.0.1'
   const port = config.port ?? 32145
   if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
-    throw new Error('dsh-game-agent only permits loopback hosts')
+    throw new Error('dsh-xiaotangyuan-game only permits loopback hosts')
   }
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     throw new Error('port must be an integer between 1024 and 65535')

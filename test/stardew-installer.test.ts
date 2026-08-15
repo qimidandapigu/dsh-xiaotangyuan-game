@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { inspectStardewPath, parseSteamLibraryPaths } from '../src/stardew-installer.js'
+import { inspectStardewPath, parseSteamLibraryPaths, selectStardewRelease } from '../src/stardew-installer.js'
 
 const temporaryPaths: string[] = []
 
@@ -42,5 +42,22 @@ describe('inspectStardewPath', () => {
     const root = await mkdtemp(join(tmpdir(), 'stardew-detect-test-'))
     temporaryPaths.push(root)
     await expect(inspectStardewPath(root)).resolves.toBeUndefined()
+  })
+})
+
+describe('selectStardewRelease', () => {
+  it('selects the newest Stardew release and skips plugin releases', () => {
+    expect(selectStardewRelease([
+      { tag_name: 'plugin-v0.3.0', draft: false, assets: [] },
+      { tag_name: 'stardew-v0.2.0', draft: false, assets: [{ name: 'mod.zip', url: 'https://example.test', size: 1 }] },
+      { tag_name: 'stardew-v0.1.0', draft: false, assets: [] },
+    ]).tag_name).toBe('stardew-v0.2.0')
+  })
+
+  it('rejects a list with no published Stardew release', () => {
+    expect(() => selectStardewRelease([
+      { tag_name: 'stardew-v0.2.0', draft: true, assets: [] },
+      { tag_name: 'plugin-v0.3.0', draft: false, assets: [] },
+    ])).toThrow('no Stardew Valley release')
   })
 })
