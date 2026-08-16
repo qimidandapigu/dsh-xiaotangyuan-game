@@ -4,6 +4,8 @@
 
 ## Harness 插件 0.6.1 - 未发布
 
+- 将饥荒 Lua Mod、Python Adapter、Jingling 动画、测试和构建历史统一迁入 `games/dont-starve-together`，停止双仓库开发。
+- 增加根目录 `check:dst`、`build:dst`，玩家包构建后自动刷新同仓库发布清单的大小与 SHA-256。
 - 增加《饥荒联机版》检测、固定清单校验、事务安装、备份回滚和 Steam 启动项生成。
 - 通用媒体层按已注册游戏进程截取客户窗口，供星露谷、饥荒和后续游戏复用。
 - 增加 `chat.retry` 与一次性 `assistant.compose`，分别支持重试和不污染主会话的游戏提醒。

@@ -26,6 +26,9 @@ games/stardew-valley/adapter
 games/stardew-valley/content-pack
   小汤圆图片和 TrinketTinker 数据
 
+games/dont-starve-together
+  饥荒 Lua Mod、轻量 Python Adapter、Jingling 动画和玩家包构建
+
 games/oxygen-not-included/adapter
   可选 ONI Harness 插件和游戏专属工具
 
@@ -40,8 +43,10 @@ games/oxygen-not-included/bridge
 ```powershell
 pnpm install
 pnpm check
+pnpm check:dst
 pnpm check:feedback
 pnpm build:stardew
+pnpm build:dst
 pnpm build:media
 pnpm build:oni
 pnpm pack:oni
@@ -53,8 +58,10 @@ pnpm pack:plugin
 | 命令 | 输出或验证 |
 |---|---|
 | `pnpm check` | TypeScript 编译与 Vitest 测试 |
+| `pnpm check:dst` | 饥荒 Python 单元测试与字节码编译 |
 | `pnpm check:feedback` | 反馈 Worker 类型检查与单元测试 |
 | `pnpm build:stardew` | `StardewAgentMod.dll` 与 SMAPI MOD zip |
+| `pnpm build:dst` | 饥荒玩家包，并自动刷新同仓库 distribution 清单的大小与 SHA-256 |
 | `pnpm build:media` | 自包含 Windows x64 `XtyMediaHost.exe` |
 | `pnpm pack:plugin` | Harness `.tgz`，必须包含媒体 Host |
 | `pnpm build:oni` | 编译缺氧 C# Bridge |
@@ -68,7 +75,7 @@ Harness Release：
 qimidandapigu-dsh-xiaotangyuan-game-<plugin-version>.tgz
 ```
 
-饥荒 Release（来自独立 `dont-starve-ai-mod` 仓库）：
+饥荒 Release：
 
 ```text
 dsh-xiaotangyuan-game-dont-starve-<version>.zip
@@ -94,6 +101,7 @@ dsh-xiaotangyuan-game-stardew-<adapter-version>.zip
 ## 版本规则
 
 - Harness 插件修改：递增 `package.json` 与 `apps/harness-plugin/package.json`。
+- 饥荒 Mod 修改：递增 `games/dont-starve-together` 中的三个版本来源，再运行 `pnpm build:dst` 刷新发布清单。
 - 尚未创建远端 tag/Release 的版本必须标记为“源码版本”或“未发布”，不能在安装文档中给出失效 URL。
 - 星露谷 DLL 或内容包修改：同时递增适配器清单、内容包清单、第一方 zip、Release tag 和 distribution 清单。
 - 协议发生不兼容变化：新增协议版本，不能静默改变 `protocol/v1` 语义。
@@ -120,6 +128,7 @@ dsh-xiaotangyuan-game-stardew-<adapter-version>.zip
 
 - 工作树中不包含研究下载、临时包或用户的无关修改。
 - `pnpm check` 通过。
+- `pnpm build:dst` 通过，且饥荒清单与本地资产大小和 SHA-256 一致。
 - `pnpm check:feedback` 通过。
 - 星露谷代码变更时 `pnpm build:stardew` 为 0 警告、0 错误。
 - 插件包中存在 `media/windows-x64/XtyMediaHost.exe`。

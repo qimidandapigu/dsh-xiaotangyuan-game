@@ -76,6 +76,7 @@ games/
   stardew-valley/
     adapter/                 轻量 SMAPI AI 桥接
     content-pack/            小汤圆外观与 TrinketTinker 配置
+  dont-starve-together/      饥荒 Lua Mod、Python Adapter、Jingling 动画与构建脚本
   oxygen-not-included/
     adapter/                 可选 ONI Harness Adapter
     bridge/                  缺氧 C# 游戏桥接
@@ -86,7 +87,7 @@ distribution/
 docs/                        中文安装、排错、架构与开发文档
 ```
 
-饥荒源码独立维护在 `dont-starve-ai-mod` 仓库，由本仓库的安装器通过固定清单获取。以后新增游戏不重复开发模型调用、语音、记忆或媒体基础设施；只有真正依赖游戏 API 的知识和动作进入可选 Adapter。
+星露谷、饥荒和缺氧源码都在本仓库统一维护；游戏发布包仍与 Harness 插件独立发版。以后新增游戏不重复开发模型调用、语音、记忆或媒体基础设施；只有真正依赖游戏 API 的知识和动作进入可选 Adapter。
 
 ## 文档
 
@@ -96,6 +97,7 @@ docs/                        中文安装、排错、架构与开发文档
 - [开发与发布](docs/DEVELOPMENT.md)
 - [更新记录](CHANGELOG.md)
 - [星露谷适配器](games/stardew-valley/README.md)
+- [饥荒联机版 Mod 与 Adapter](games/dont-starve-together/README.md)
 - [缺氧 Adapter 与 Bridge](games/oxygen-not-included/README.md)
 - [自动反馈接收端](apps/feedback-receiver/README.md)
 - [Harness 插件配置](apps/harness-plugin/README.md)
@@ -117,7 +119,9 @@ docs/                        中文安装、排错、架构与开发文档
 ```powershell
 pnpm install
 pnpm check
+pnpm check:dst
 pnpm build:stardew
+pnpm build:dst
 pnpm build:media
 pnpm pack:plugin
 ```
