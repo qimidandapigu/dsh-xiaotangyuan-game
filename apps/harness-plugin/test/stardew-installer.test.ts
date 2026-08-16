@@ -6,6 +6,7 @@ import {
   inspectStardewPath,
   isCompatibleStardewRelease,
   compareStableVersions,
+  migrateLegacyStardewBackups,
   parseStardewDistributionManifest,
   parseSteamLibraryPaths,
   preserveStardewConfig,
@@ -104,6 +105,43 @@ describe('parseStardewDistributionManifest', () => {
       ...validManifest,
       archive: { ...validManifest.archive, sha256: 'not-a-checksum' },
     })).toThrow('无效的 SHA-256')
+  })
+})
+
+describe('migrateLegacyStardewBackups', () => {
+  it('moves only XiaoTangYuan-managed backup mods outside Mods', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'stardew-backup-migration-test-'))
+    temporaryPaths.push(root)
+    const mods = join(root, 'Mods')
+    const backupRoot = join(root, '.xiaotangyuan-backups')
+    const managed = join(mods, 'StardewAgentMod.backup-old')
+    const unrelated = join(mods, 'OtherMod.backup-old')
+    await mkdir(managed, { recursive: true })
+    await mkdir(unrelated, { recursive: true })
+    await writeFile(join(managed, 'manifest.json'), JSON.stringify({
+      UniqueID: 'qimidandapigu.StardewAgent',
+      Version: '0.4.0',
+    }))
+    await writeFile(join(unrelated, 'manifest.json'), JSON.stringify({
+      UniqueID: 'example.OtherMod',
+      Version: '1.0.0',
+    }))
+
+    const moved = await migrateLegacyStardewBackups(mods, backupRoot)
+
+    expect(moved).toHaveLength(1)
+    await expect(readFile(join(moved[0]!, 'manifest.json'), 'utf8')).resolves.toContain('qimidandapigu.StardewAgent')
+    await expect(readFile(join(unrelated, 'manifest.json'), 'utf8')).resolves.toContain('example.OtherMod')
+    await expect(readFile(join(managed, 'manifest.json'), 'utf8')).rejects.toThrow()
+  })
+
+  it('rejects a backup root inside Mods', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'stardew-backup-migration-test-'))
+    temporaryPaths.push(root)
+    const mods = join(root, 'Mods')
+    await mkdir(mods)
+    await expect(migrateLegacyStardewBackups(mods, join(mods, 'Backups')))
+      .rejects.toThrow('不能位于 Mods 内')
   })
 })
 

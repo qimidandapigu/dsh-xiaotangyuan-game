@@ -28,6 +28,12 @@ const MOD_FOLDER_NAME = 'StardewAgentMod'
 const COMPANION_FOLDER_NAME = 'XiaoTangYuanCompanion'
 const ADAPTER_UNIQUE_ID = 'qimidandapigu.StardewAgent'
 const COMPANION_UNIQUE_ID = 'qimidandapigu.XiaoTangYuanCompanion'
+const MANAGED_UNIQUE_IDS = new Set([
+  ADAPTER_UNIQUE_ID,
+  COMPANION_UNIQUE_ID,
+  'Pathoschild.ContentPatcher',
+  'mushymato.TrinketTinker',
+])
 const MAX_ARCHIVE_SIZE = 50 * 1024 * 1024
 const MAX_COMPONENT_ARCHIVE_SIZE = 10 * 1024 * 1024
 
@@ -542,6 +548,44 @@ export async function preserveStardewConfig(backupPath: string, destination: str
   return true
 }
 
+async function availableBackupPath(backupRoot: string, name: string): Promise<string> {
+  const initial = join(backupRoot, name)
+  if (!(await exists(initial))) return initial
+  for (let index = 1; index <= 1000; index += 1) {
+    const candidate = join(backupRoot, `${name}-${index}`)
+    if (!(await exists(candidate))) return candidate
+  }
+  throw new Error(`无法为 ${name} 创建唯一备份目录`)
+}
+
+export async function migrateLegacyStardewBackups(
+  modsPath: string,
+  backupRoot: string,
+): Promise<string[]> {
+  const gameRoot = resolve(modsPath, '..')
+  safeChild(gameRoot, backupRoot)
+  const pathFromMods = relative(resolve(modsPath), resolve(backupRoot))
+  if (pathFromMods === '' || (!pathFromMods.startsWith('..') && !isAbsolute(pathFromMods))) {
+    throw new Error('星露谷备份目录不能位于 Mods 内')
+  }
+  if (!(await exists(modsPath))) return []
+
+  await mkdir(backupRoot, { recursive: true })
+  const moved: string[] = []
+  for (const entry of await readdir(modsPath, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.includes('.backup-')) continue
+    const source = join(modsPath, entry.name)
+    const manifest = await readManifest(join(source, 'manifest.json'))
+    if (manifest?.UniqueID === undefined || !MANAGED_UNIQUE_IDS.has(manifest.UniqueID)) continue
+    safeChild(modsPath, source)
+    const destination = await availableBackupPath(backupRoot, entry.name)
+    safeChild(backupRoot, destination)
+    await rename(source, destination)
+    moved.push(destination)
+  }
+  return moved
+}
+
 export function compareStableVersions(left: string, right: string): number | undefined {
   const leftParts = numericVersion(left)
   const rightParts = numericVersion(right)
@@ -606,6 +650,7 @@ async function prepareArchivePackages(
 
 async function applyPreparedPackage(
   modsPath: string,
+  backupRoot: string,
   prepared: PreparedPackage,
   timestamp: string,
 ): Promise<AppliedPackage> {
@@ -625,8 +670,8 @@ async function applyPreparedPackage(
   safeChild(modsPath, destination)
   let backupPath: string | undefined
   if (await exists(destination)) {
-    backupPath = join(modsPath, `${basename(destination)}.backup-${timestamp}`)
-    safeChild(modsPath, backupPath)
+    backupPath = await availableBackupPath(backupRoot, `${basename(destination)}.backup-${timestamp}`)
+    safeChild(backupRoot, backupPath)
     await rename(destination, backupPath)
   }
 
@@ -729,11 +774,14 @@ export async function installStardewMod(
     }
 
     await mkdir(detection.modsPath, { recursive: true })
+    const backupRoot = join(detection.gamePath, '.xiaotangyuan-backups')
+    await mkdir(backupRoot, { recursive: true })
+    const migratedBackups = await migrateLegacyStardewBackups(detection.modsPath, backupRoot)
     const timestamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
     const applied: AppliedPackage[] = []
     try {
       for (const prepared of [...dependencies, ...firstParty]) {
-        applied.push(await applyPreparedPackage(detection.modsPath, prepared, timestamp))
+        applied.push(await applyPreparedPackage(detection.modsPath, backupRoot, prepared, timestamp))
       }
     } catch (error) {
       await rollbackAppliedPackages(applied)
@@ -747,7 +795,10 @@ export async function installStardewMod(
       gamePath: detection.gamePath,
       modPath: adapter.destination,
       ...(adapter.backupPath === undefined ? {} : { backupPath: adapter.backupPath }),
-      components: applied.map(item => `${item.name} ${item.version} (${item.action})`).join(', '),
+      components: [
+        ...applied.map(item => `${item.name} ${item.version} (${item.action})`),
+        ...(migratedBackups.length === 0 ? [] : [`迁移旧备份 ${migratedBackups.length} 个`]),
+      ].join(', '),
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
