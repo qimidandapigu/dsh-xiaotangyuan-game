@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   inspectStardewPath,
   isCompatibleStardewRelease,
+  parseStardewDistributionManifest,
   parseSteamLibraryPaths,
   selectStardewRelease,
 } from '../src/installation/stardew-valley.js'
@@ -13,6 +14,39 @@ const temporaryPaths: string[] = []
 
 afterEach(async () => {
   await Promise.all(temporaryPaths.splice(0).map(path => rm(path, { recursive: true, force: true })))
+})
+
+describe('parseStardewDistributionManifest', () => {
+  const validManifest = {
+    schemaVersion: 1,
+    tag: 'stardew-v0.4.0',
+    version: '0.4.0',
+    archive: {
+      name: 'dsh-xiaotangyuan-game-stardew-0.4.0.zip',
+      url: 'https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/stardew-v0.4.0/dsh-xiaotangyuan-game-stardew-0.4.0.zip',
+      size: 39081,
+      sha256: '0a1b712f4ca0498e79d742cfe6c0c3fea9d49a64300505e1590044da7a233a3b',
+    },
+  }
+
+  it('accepts the official static release manifest', () => {
+    expect(parseStardewDistributionManifest(validManifest)).toEqual(validManifest)
+  })
+
+  it('rejects a mismatched version or foreign archive URL', () => {
+    expect(() => parseStardewDistributionManifest({ ...validManifest, version: '0.3.0' })).toThrow('版本与标签不一致')
+    expect(() => parseStardewDistributionManifest({
+      ...validManifest,
+      archive: { ...validManifest.archive, url: 'https://example.test/mod.zip' },
+    })).toThrow('非官方安装地址')
+  })
+
+  it('rejects an invalid checksum', () => {
+    expect(() => parseStardewDistributionManifest({
+      ...validManifest,
+      archive: { ...validManifest.archive, sha256: 'not-a-checksum' },
+    })).toThrow('无效的 SHA-256')
+  })
 })
 
 describe('parseSteamLibraryPaths', () => {
