@@ -1,0 +1,148 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from dont_starve_ai_mod.app import ChesterApp, build_chat_context, write_reply
+
+
+class FakeGateway:
+    def __init__(self) -> None:
+        self.connected = True
+        self.notifications: list[tuple[str, dict[str, object]]] = []
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def start(self, _process_id: int) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def notify(self, method: str, params: dict[str, object]) -> bool:
+        self.notifications.append((method, params))
+        return True
+
+    def call(self, method: str, params: dict[str, object], _timeout: float) -> object:
+        self.calls.append((method, params))
+        return {"reply": "Harness reply"}
+
+
+class ModRequestTests(unittest.TestCase):
+    def make_app(self, root: Path) -> tuple[ChesterApp, FakeGateway]:
+        gateway = FakeGateway()
+        settings = SimpleNamespace(
+            gateway_url="ws://127.0.0.1:32145",
+            connection_timeout_seconds=1.0,
+            request_timeout_seconds=10.0,
+            request_file=root / "requests.json",
+            reply_file=root / "reply.json",
+            bridge_status_file=root / "bridge_status.json",
+        )
+        return ChesterApp(settings, gateway=gateway), gateway
+
+    def test_reads_new_json_events_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, _ = self.make_app(root)
+            document = {"events": [{"id": "1", "action": "start_recording"}]}
+            app.settings.request_file.write_text(json.dumps(document), encoding="utf-8")
+            self.assertEqual(len(app._read_mod_requests(app.settings.request_file)), 1)
+            self.assertEqual(app._read_mod_requests(app.settings.request_file), [])
+
+    def test_accepts_single_event_json_for_compatibility(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app, _ = self.make_app(root)
+            app.settings.request_file.write_text(
+                json.dumps({"id": "1", "action": "start_recording"}),
+                encoding="utf-8",
+            )
+            self.assertEqual(app._read_mod_requests(app.settings.request_file)[0]["action"], "start_recording")
+
+    def test_start_and_stop_publish_state_instead_of_recording_locally(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app, gateway = self.make_app(Path(directory))
+            state = {"player": {"name": "Wilson"}}
+            app._handle_mod_request(
+                {"action": "start_recording", "state": state, "recipient_userid": "KU_test"}
+            )
+            app._handle_mod_request({"action": "stop_recording", "state": state})
+            self.assertEqual(
+                gateway.notifications,
+                [
+                    ("state.update", {"observation": state}),
+                    ("state.update", {"observation": state}),
+                ],
+            )
+
+    def test_retry_routes_to_harness_in_a_background_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app, _ = self.make_app(Path(directory))
+            state = {"player": {"name": "Wilson"}}
+            with patch("dont_starve_ai_mod.app.threading.Thread") as thread:
+                app._handle_mod_request({"action": "retry_last", "state": state})
+            self.assertEqual(thread.call_args.kwargs["args"], (state, None))
+            self.assertEqual(thread.call_args.kwargs["name"], "chester-harness-retry")
+            thread.return_value.start.assert_called_once_with()
+
+    def test_game_reminder_uses_ephemeral_harness_composition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app, _ = self.make_app(Path(directory))
+            with patch("dont_starve_ai_mod.app.threading.Thread") as thread:
+                app._handle_mod_request(
+                    {
+                        "action": "game_reminder",
+                        "recipient_userid": "KU_test",
+                        "reminder": {"kind": "night", "message": "天黑了。"},
+                    }
+                )
+            self.assertEqual(
+                thread.call_args.kwargs["args"],
+                ("night", "天黑了。", None, "KU_test"),
+            )
+            self.assertEqual(thread.call_args.kwargs["name"], "chester-harness-reminder")
+
+    def test_harness_present_notification_writes_recipient_reply(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app, _ = self.make_app(Path(directory))
+            app._active_recipient_userid = "KU_test"
+            app._on_harness_notification("assistant.present", {"text": "你好"})
+            payload = json.loads(app.settings.reply_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["text"], "你好")
+            self.assertEqual(payload["recipient_userid"], "KU_test")
+
+    def test_bridge_status_identifies_harness_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app, _ = self.make_app(Path(directory))
+            app._write_bridge_status(force=True)
+            payload = json.loads(app.settings.bridge_status_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["chat_model"], "DeepSeek Harness")
+            self.assertTrue(payload["gateway_connected"])
+            self.assertEqual(payload["schema_version"], 2)
+
+    def test_builds_structured_harness_context(self) -> None:
+        context = build_chat_context(
+            {
+                "player": {"name": "Wilson"},
+                "world": {"cycles": 4, "season": "autumn", "phase": "night"},
+                "nearby": [{"prefab": "chester"}],
+            }
+        )
+        self.assertEqual(context["playerName"], "Wilson")
+        self.assertEqual(context["date"], "Day 5, autumn")
+        self.assertEqual(context["time"], "night")
+        self.assertEqual(context["nearbyNpc"], "chester")
+
+    def test_write_reply_keeps_recipient_and_duration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "reply.json"
+            write_reply(path, "Hello", "KU_test", 12.5)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["recipient_userid"], "KU_test")
+            self.assertEqual(payload["display_duration_seconds"], 12.5)
+
+
+if __name__ == "__main__":
+    unittest.main()
