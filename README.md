@@ -1,78 +1,109 @@
 # dsh-xiaotangyuan-game
 
-小汤圆游戏 AI 的单仓库。DeepSeek Harness 插件承载通用 AI、语音、多模态、结构化处理和工程运行时；每个游戏只保留必须调用游戏 API 的薄适配器。
+小汤圆游戏 AI 的单仓库。DeepSeek Harness 插件承载通用 Agent、模型、多模态、语音、结构化处理和安装能力；每个游戏只保留必须调用游戏 API 的薄适配器。
 
 ```text
-麦克风 / 游戏窗口 / 游戏事件
-              |
-              v
-apps/harness-plugin          一套可复用的重型运行时
-  Agent + 上下文 + 工具 + Provider 调度
-  多模态 + ASR + TTS + 主机媒体能力
-              |
-              v  protocol/v1
-games/*/adapter              少量游戏专属桥接代码
-  读取游戏状态 + 执行动作 + 游戏内界面
+玩家文字 / 麦克风 / 游戏窗口
+              ↓
+DeepSeek Harness + 小汤圆插件
+Agent、视觉、ASR、TTS、工具、安装器、媒体 Host
+              ↓ protocol/v1
+游戏薄适配器
+读取状态、调用游戏 API、呈现回复
 ```
 
-智谱、豆包或其他服务只是可替换的 Provider。产品要求的是多模态理解、语音识别、语音合成、麦克风采集和音频播放能力，不把核心架构绑定到某个厂商。
+## 当前发布版本
 
-## 仓库目录
+| 组件 | 版本 | 说明 |
+|---|---:|---|
+| Harness 插件 | `0.5.1` | 通用运行时、语音媒体 Host、星露谷安装器 |
+| 星露谷适配器 | `0.5.0` | SMAPI 薄桥接 |
+| 小汤圆外观包 | `0.5.0` | Content Patcher 内容包 |
+| Content Patcher | `2.9.1` | 官方第三方资源加载组件 |
+| TrinketTinker | `1.9.0` | 官方第三方宠物跟随与渲染组件 |
 
-```text
-apps/
-  harness-plugin/            发布给 DeepSeek Harness 的插件
-    src/gateway/             适配器连接与请求路由
-    src/runtime/agent/       Harness Agent 会话
-    src/runtime/providers/   与厂商无关的能力接口
-    src/installation/        游戏适配器检测与安装
-    src/tools/               暴露给模型的 Harness 工具
-    src/protocol/            Gateway 使用的协议解析代码
-    test/                    插件测试
-protocol/
-  v1/                        与语言无关的适配器协议
-games/
-  stardew-valley/
-    adapter/                 轻量 SMAPI AI 桥接
-    content-pack/            小汤圆外观与组件配置
-docs/                        架构和职责说明
-```
+Harness 插件和游戏包独立发版，所以版本号不要求完全相同。
 
-以后新增游戏时统一放在 `games/` 下，不再为每个游戏创建独立仓库，也不重复开发模型调用、语音、记忆或媒体基础设施。
+## 快速开始
 
-## 安装
-
-首次将小汤圆插件安装到 DeepSeek Harness：
+1. 安装 Harness 插件：
 
 ```powershell
 dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.5.1/qimidandapigu-dsh-xiaotangyuan-game-0.5.1.tgz"
 ```
 
-重启 Harness、刷新页面并新建对话，然后说：
+2. 重启 DeepSeek Harness，刷新页面并新建对话。
+3. 对小汤圆说：
 
 ```text
 小汤圆，帮我检测并安装星露谷物语的 AI MOD
 ```
 
-插件会调用 `game_mod_detect` 和 `game_mod_install`，检测 Steam、星露谷与 SMAPI，并完成整套安装。第一方 Release 只包含轻量 AI 适配器和小汤圆内容包；安装器另外从官方来源下载并校验 Content Patcher 与 TrinketTinker，旧版本会先备份。用户不需要手动寻找这些依赖，仓库也不复制第三方二进制文件。
+4. 安装完成后通过 SMAPI 启动或重启星露谷物语。
 
-如果已经安装过旧的 `@qimidandapigu/dsh-game-agent`，请先移除它，避免两个 Gateway 同时占用 `32145` 端口。
+进入存档后：
 
-## 常用命令
+- 按 `T` 输入文字并发送给小汤圆。
+- 保持游戏窗口在前台，按住 `V` 录音，松开后进行 ASR、Agent 回复和 TTS 播放。
+
+完整前置条件、凭据配置和升级说明见[安装指南](docs/INSTALLATION.md)。
+
+## 仓库目录
+
+```text
+apps/
+  harness-plugin/            DeepSeek Harness 插件
+    src/gateway/             游戏连接与请求路由
+    src/runtime/             Agent、多模态、语音、媒体能力
+    src/installation/        游戏检测、下载、校验、安装与备份
+    src/tools/               暴露给模型的安装工具
+    test/                    插件测试
+  windows-media-host/        Windows 麦克风与音频播放 Host
+protocol/
+  v1/                        与语言无关的 JSON-RPC 协议
+games/
+  stardew-valley/
+    adapter/                 轻量 SMAPI AI 桥接
+    content-pack/            小汤圆外观与 TrinketTinker 配置
+distribution/                稳定发布清单与固定校验值
+docs/                        中文安装、排错、架构与开发文档
+```
+
+以后新增游戏统一放在 `games/` 下，不为每个游戏重复开发模型调用、语音、记忆或媒体基础设施。
+
+## 文档
+
+- [安装与升级](docs/INSTALLATION.md)
+- [常见问题与排错](docs/TROUBLESHOOTING.md)
+- [架构和职责边界](docs/ARCHITECTURE.md)
+- [开发与发布](docs/DEVELOPMENT.md)
+- [更新记录](CHANGELOG.md)
+- [星露谷适配器](games/stardew-valley/README.md)
+- [Harness 插件配置](apps/harness-plugin/README.md)
+- [游戏协议 v1](protocol/v1/README.md)
+
+## 安装与安全原则
+
+- 插件包和星露谷包分开发布；游戏适配器不塞进 Harness 插件。
+- 第一方星露谷包只包含 `StardewAgentMod` 和 `XiaoTangYuanCompanion`。
+- Content Patcher 与 TrinketTinker 从各自官方来源下载，不重新打包进本仓库 Release。
+- 下载前校验来源、版本、文件大小和 SHA-256。
+- 覆盖升级使用事务安装；失败时恢复旧版本。
+- 备份保存在游戏根目录 `.xiaotangyuan-backups`，绝不放进 `Mods`。
+- Provider 密钥由 DSH 凭据管理器保存；插件只保存凭据名称，不保存 Key 内容。
+
+## 开发命令
 
 ```powershell
 pnpm install
 pnpm check
 pnpm build:stardew
+pnpm build:media
 pnpm pack:plugin
 ```
 
-发布的插件包名仍为 `@qimidandapigu/dsh-xiaotangyuan-game`。游戏适配器二进制文件使用独立的 Release 安装包；用户在 Harness 中提出安装请求后，由插件按需下载。
-
-## 当前状态
-
-Harness 插件 `0.5.1` 已实现 Gateway、结构化星露谷状态、多模态模型自动选择、DSH 凭据驱动的语音 Provider、稳定发布清单、升级时保留游戏配置，以及随插件分发的 Windows 麦克风与音频播放 Host。安装备份统一保存在游戏根目录的 `.xiaotangyuan-backups`，不会被 SMAPI 当成重复 MOD；旧版遗留备份会在升级时自动迁移。星露谷适配器 `0.5.0` 把宠物移动与渲染交给成熟组件，只同步 AI 的录音、思考和回复状态。
+更多构建、测试和发版约束见[开发与发布](docs/DEVELOPMENT.md)。
 
 ## 许可证
 
-MIT
+MIT。第三方组件遵循各自许可证，本仓库不改变或重新授权它们。

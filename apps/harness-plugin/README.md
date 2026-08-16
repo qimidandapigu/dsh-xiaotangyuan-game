@@ -1,19 +1,18 @@
 # @qimidandapigu/dsh-xiaotangyuan-game
 
-这是运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。
+运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.5.1`。
 
-## 负责范围
+## 职责
 
-本插件统一负责：
+- Agent 会话与默认模型调用。
+- 游戏截图与多模态模型路由。
+- ASR、TTS 与语音 Provider 调度。
+- Windows 麦克风、前台游戏热键和音频播放。
+- 本地 WebSocket Gateway。
+- 游戏适配器检测、下载、校验、备份、安装和回滚。
+- 暴露 `game_mod_detect` 与 `game_mod_install` 给 Harness Agent。
 
-- Agent 会话与模型调度。
-- 多模态、语音识别和语音合成 Provider 调度。
-- 结构化输出、校验、重试和工具编排。
-- 麦克风、游戏窗口捕获和音频播放等主机媒体能力。
-- 本地游戏 Gateway。
-- 游戏适配器检测、安装与升级。
-
-游戏专属代码不会打进这个 npm 插件包。编译后的游戏适配器使用同一 GitHub 仓库中的独立 Release 安装包；用户在 Harness 中提出安装请求后，由插件下载并安装。
+游戏专属 DLL 不打进本插件。编译后的适配器通过同仓库独立 Release 按需下载。
 
 ## 安装
 
@@ -21,14 +20,68 @@
 dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.5.1/qimidandapigu-dsh-xiaotangyuan-game-0.5.1.tgz"
 ```
 
-重启 Harness 后即可通过对话让小汤圆检测并安装各游戏的适配器。星露谷物语的请求示例：`小汤圆，帮我检测并安装星露谷物语的 AI MOD`。
+安装后重启 Harness。默认监听：
 
-星露谷安装器会把第一方适配器与外观内容包和第三方运行组件分开处理。Content Patcher 与 TrinketTinker 始终从各自官方来源下载，经过版本、大小和 SHA-256 校验后再安装；它们不会被重新打包进小汤圆 Release。
+```text
+ws://127.0.0.1:32145
+```
 
-升级备份保存在星露谷根目录的 `.xiaotangyuan-backups`，不会放进 `Mods`。安装器也会迁移旧版本遗留在 `Mods` 中的小汤圆相关备份，避免 SMAPI 将备份识别为重复 MOD。
+Gateway 只允许 `127.0.0.1`、`localhost` 或 `::1`，不会暴露到局域网。
 
-Gateway 只允许绑定本机回环地址，默认地址为 `ws://127.0.0.1:32145`。
+## 配置
 
-## Provider 原则
+配置结构：
 
-语音和多模态是引擎必备能力，智谱、豆包等厂商只是可替换实现。Provider 密钥只保存在 Harness 中，不进入任何游戏适配器。
+| 字段 | 默认值 | 作用 |
+|---|---|---|
+| `host` | `127.0.0.1` | Gateway 地址，仅允许回环地址 |
+| `port` | `32145` | Gateway 端口 |
+| `vision.enabled` | `true` | 启用游戏截图理解 |
+| `vision.prompt` | 内置中文观察提示 | 视觉模型观察指令 |
+| `speech.enabled` | `true` | 启用 ASR 与 TTS |
+| `speech.provider` | `auto` | 从已注册语音 Provider 中选择 |
+| `speech.credentialRef` | `VOLCENGINE_API_KEY` | DSH 凭据名称，不是 Key 内容 |
+| `speech.asrResourceId` | `volc.bigasr.auc` | 当前火山 ASR 资源 |
+| `speech.ttsResourceId` | `seed-tts-1.0` | 当前火山 TTS 资源 |
+| `speech.ttsVoice` | 内置中文女声 | TTS 发音人 |
+| `media.enabled` | `true` | 启用 Windows 媒体 Host |
+| `media.pushToTalkVirtualKey` | `86` | Windows Virtual-Key，默认 `V` |
+| `media.executablePath` | 插件内置路径 | 自定义媒体 Host 路径 |
+
+Provider 接口是厂商无关的，但 `0.5.1` 实际注册的语音实现只有 `VolcengineSpeechProvider`。新增厂商时应实现通用 `SpeechCapabilityProvider`，不能修改星露谷适配器。
+
+所有真实密钥通过 `ctx.credentials.resolve(ref)` 在操作时解析。插件配置只保存凭据引用，不缓存或持久化秘密。
+
+## 语音链路
+
+```text
+游戏适配器连接 Gateway 并上报进程 ID
+                 ↓
+媒体 Host 只接受前台且已连接的游戏进程
+                 ↓
+按住 V → 录制默认麦克风 → 松开 V
+                 ↓
+ASR → 游戏 Agent → TTS → Windows 播放
+```
+
+媒体 Host 是 Windows x64 自包含程序，打包时必须确认 `.tgz` 中存在：
+
+```text
+media/windows-x64/XtyMediaHost.exe
+```
+
+## 星露谷安装器
+
+安装器会：
+
+1. 自动查找 Steam 与星露谷目录。
+2. 检查 SMAPI 和四个组件版本。
+3. 读取 v2 静态发布清单，GitHub API 仅作回退。
+4. 拒绝未知组件、非官方地址、超限包和不匹配的 SHA-256。
+5. 解压后验证 `manifest.json`、`UniqueID` 和版本。
+6. 保留旧 `StardewAgentMod/config.json`。
+7. 事务安装，失败时回滚本轮替换。
+8. 将备份写入游戏根目录 `.xiaotangyuan-backups`。
+9. 自动迁移旧安装器遗留在 `Mods` 中的小汤圆相关备份。
+
+更多用户步骤见[安装指南](../../docs/INSTALLATION.md)，故障定位见[排错指南](../../docs/TROUBLESHOOTING.md)。
