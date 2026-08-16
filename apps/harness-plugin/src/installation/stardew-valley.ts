@@ -344,6 +344,13 @@ function checksumLine(text: string, assetName: string): string | undefined {
   return undefined
 }
 
+export async function preserveStardewConfig(backupPath: string, destination: string): Promise<boolean> {
+  const previousConfig = join(backupPath, 'config.json')
+  if (!(await exists(previousConfig))) return false
+  await cp(previousConfig, join(destination, 'config.json'), { force: true })
+  return true
+}
+
 export async function installStardewMod(
   gamePath: string | undefined,
   signal: AbortSignal,
@@ -400,6 +407,7 @@ export async function installStardewMod(
 
     try {
       await cp(sourcePath, destination, { recursive: true, errorOnExist: true })
+      if (backupPath !== undefined) await preserveStardewConfig(backupPath, destination)
       const installed = await readManifest(join(destination, 'manifest.json'))
       if (installed?.UniqueID !== 'qimidandapigu.StardewAgent') {
         throw new Error('installed MOD failed manifest verification')

@@ -3,6 +3,7 @@ dist/
 coverage/
 .release/
 *.log
+*.tgz
 .env
 **/bin/
 **/obj/

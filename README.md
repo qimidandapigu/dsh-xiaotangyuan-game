@@ -44,7 +44,7 @@ docs/                        架构和职责说明
 首次将小汤圆插件安装到 DeepSeek Harness：
 
 ```powershell
-dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.4.1/qimidandapigu-dsh-xiaotangyuan-game-0.4.1.tgz"
+dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.4.2/qimidandapigu-dsh-xiaotangyuan-game-0.4.2.tgz"
 ```
 
 重启 Harness、刷新页面并新建对话，然后说：
@@ -70,7 +70,7 @@ pnpm pack:plugin
 
 ## 当前状态
 
-Harness 插件 `0.4.1` 已实现 Gateway、结构化星露谷状态、多模态模型自动选择、DSH 凭据驱动的语音 Provider、稳定发布清单，以及随插件分发的 Windows 麦克风与音频播放 Host。星露谷适配器 `0.4.0` 内置小汤圆宠物形象和录音/思考气泡反馈。日记、主动对话、关系任务和完整游戏动作仍在后续迁移范围内。
+Harness 插件 `0.4.2` 已实现 Gateway、结构化星露谷状态、多模态模型自动选择、DSH 凭据驱动的语音 Provider、稳定发布清单、升级时保留游戏配置，以及随插件分发的 Windows 麦克风与音频播放 Host。星露谷适配器 `0.4.0` 内置小汤圆宠物形象和录音/思考气泡反馈。日记、主动对话、关系任务和完整游戏动作仍在后续迁移范围内。
 
 ## 许可证
 
