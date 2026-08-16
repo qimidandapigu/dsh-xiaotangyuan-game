@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -7,6 +7,7 @@ import {
   isCompatibleStardewRelease,
   parseStardewDistributionManifest,
   parseSteamLibraryPaths,
+  preserveStardewConfig,
   selectStardewRelease,
 } from '../src/installation/stardew-valley.js'
 
@@ -14,6 +15,35 @@ const temporaryPaths: string[] = []
 
 afterEach(async () => {
   await Promise.all(temporaryPaths.splice(0).map(path => rm(path, { recursive: true, force: true })))
+})
+
+describe('preserveStardewConfig', () => {
+  it('restores the previous config over packaged defaults', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'stardew-config-test-'))
+    temporaryPaths.push(root)
+    const backup = join(root, 'backup')
+    const destination = join(root, 'destination')
+    await mkdir(backup)
+    await mkdir(destination)
+    await writeFile(join(backup, 'config.json'), '{"TextChatKey":"T"}')
+    await writeFile(join(destination, 'config.json'), '{"TextChatKey":"Y"}')
+
+    await expect(preserveStardewConfig(backup, destination)).resolves.toBe(true)
+    await expect(readFile(join(destination, 'config.json'), 'utf8')).resolves.toBe('{"TextChatKey":"T"}')
+  })
+
+  it('leaves the destination unchanged when no previous config exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'stardew-config-test-'))
+    temporaryPaths.push(root)
+    const backup = join(root, 'backup')
+    const destination = join(root, 'destination')
+    await mkdir(backup)
+    await mkdir(destination)
+    await writeFile(join(destination, 'config.json'), '{"TextChatKey":"Y"}')
+
+    await expect(preserveStardewConfig(backup, destination)).resolves.toBe(false)
+    await expect(readFile(join(destination, 'config.json'), 'utf8')).resolves.toBe('{"TextChatKey":"Y"}')
+  })
 })
 
 describe('parseStardewDistributionManifest', () => {
