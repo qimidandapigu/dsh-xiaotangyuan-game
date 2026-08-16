@@ -17,11 +17,20 @@ apps/harness-plugin
 apps/windows-media-host
   Windows 麦克风录制、前台进程限制、V 热键、WAV 播放
 
+apps/feedback-receiver
+  官方 Harness 签名校验、重放保护、私有 GitHub Issue 写入
+
 games/stardew-valley/adapter
   SMAPI 状态、T 文字输入、Gateway、游戏内气泡
 
 games/stardew-valley/content-pack
   小汤圆图片和 TrinketTinker 数据
+
+games/oxygen-not-included/adapter
+  可选 ONI Harness 插件和游戏专属工具
+
+games/oxygen-not-included/bridge
+  缺氧原生状态、动作和游戏内 UI
 ```
 
 不要把 Provider SDK、API Key、Prompt、长期记忆、麦克风或扬声器逻辑放回游戏适配器。
@@ -31,8 +40,11 @@ games/stardew-valley/content-pack
 ```powershell
 pnpm install
 pnpm check
+pnpm check:feedback
 pnpm build:stardew
 pnpm build:media
+pnpm build:oni
+pnpm pack:oni
 pnpm pack:plugin
 ```
 
@@ -41,9 +53,12 @@ pnpm pack:plugin
 | 命令 | 输出或验证 |
 |---|---|
 | `pnpm check` | TypeScript 编译与 Vitest 测试 |
+| `pnpm check:feedback` | 反馈 Worker 类型检查与单元测试 |
 | `pnpm build:stardew` | `StardewAgentMod.dll` 与 SMAPI MOD zip |
 | `pnpm build:media` | 自包含 Windows x64 `XtyMediaHost.exe` |
 | `pnpm pack:plugin` | Harness `.tgz`，必须包含媒体 Host |
+| `pnpm build:oni` | 编译缺氧 C# Bridge |
+| `pnpm pack:oni` | 生成缺氧 Bridge ZIP 并刷新发布清单 |
 
 ## 发布物边界
 
@@ -51,6 +66,19 @@ Harness Release：
 
 ```text
 qimidandapigu-dsh-xiaotangyuan-game-<plugin-version>.tgz
+```
+
+饥荒 Release（来自独立 `dont-starve-ai-mod` 仓库）：
+
+```text
+dsh-xiaotangyuan-game-dont-starve-<version>.zip
+```
+
+缺氧 Release：
+
+```text
+dsh-xiaotangyuan-game-oni-<version>.zip   C# Bridge
+qimidandapigu-oni-adapter-<version>.tgz   可选 Harness Adapter
 ```
 
 星露谷 Release：
@@ -66,6 +94,7 @@ dsh-xiaotangyuan-game-stardew-<adapter-version>.zip
 ## 版本规则
 
 - Harness 插件修改：递增 `package.json` 与 `apps/harness-plugin/package.json`。
+- 尚未创建远端 tag/Release 的版本必须标记为“源码版本”或“未发布”，不能在安装文档中给出失效 URL。
 - 星露谷 DLL 或内容包修改：同时递增适配器清单、内容包清单、第一方 zip、Release tag 和 distribution 清单。
 - 协议发生不兼容变化：新增协议版本，不能静默改变 `protocol/v1` 语义。
 - 文档必须列出插件版本和适配器版本，不能假设二者相同。
@@ -82,6 +111,8 @@ dsh-xiaotangyuan-game-stardew-<adapter-version>.zip
 6. 备份路径位于游戏根目录 `.xiaotangyuan-backups`，不在 `Mods`。
 7. 旧版遗留备份只迁移小汤圆管理的组件。
 8. 隔离假游戏目录的完整下载、解压和升级测试。
+9. 饥荒包同时包含 `ChesterAI.exe`、`modmain.lua`、`modinfo.lua` 与 `anim/jingling.zip`。
+10. 反馈接收端只授予目标仓库 Issues 写权限，并验证签名、时间戳和 nonce。
 
 构建成功不等于游戏内验证成功。发布后仍需通过 SMAPI 重启游戏，并检查 `SMAPI-latest.txt` 和一次真实 T/V 对话。
 
@@ -89,8 +120,10 @@ dsh-xiaotangyuan-game-stardew-<adapter-version>.zip
 
 - 工作树中不包含研究下载、临时包或用户的无关修改。
 - `pnpm check` 通过。
+- `pnpm check:feedback` 通过。
 - 星露谷代码变更时 `pnpm build:stardew` 为 0 警告、0 错误。
 - 插件包中存在 `media/windows-x64/XtyMediaHost.exe`。
 - Release 资产的远端大小和 digest 与本地一致。
 - GitHub `main` 已包含生成该资产的源提交。
+- `git ls-remote --tags origin` 已确认目标 tag 是否真实存在，文档状态与远端一致。
 - 正式 Harness profile 升级后，确认 `3080` 与 `32145` 正常监听。

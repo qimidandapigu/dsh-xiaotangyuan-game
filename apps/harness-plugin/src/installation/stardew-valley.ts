@@ -244,7 +244,7 @@ async function windowsSteamRoot(signal?: AbortSignal): Promise<string | undefine
   }
 }
 
-async function steamRoots(signal?: AbortSignal): Promise<string[]> {
+export async function steamRoots(signal?: AbortSignal): Promise<string[]> {
   const roots = new Set<string>()
   const add = (value: string | undefined): void => {
     if (value !== undefined && value.trim() !== '') roots.add(normalize(value))

@@ -13,6 +13,7 @@ export interface VoiceInteractionHandler {
 
 export class SpeechController {
   private readonly active = new Set<number>()
+  private targets: readonly number[] = []
   private disposeListener?: () => void
 
   constructor(
@@ -29,7 +30,7 @@ export class SpeechController {
       this.ctx.logger.warn('xiaotangyuan-game: 当前没有已配置的语音 Provider')
     }
     this.disposeListener = this.media.onEvent(event => this.onMediaEvent(event))
-    await this.media.start()
+    if (await this.media.start()) this.media.configure(this.targets)
   }
 
   private async selectProvider(): Promise<SpeechCapabilityProvider | undefined> {
@@ -43,7 +44,15 @@ export class SpeechController {
   }
 
   updateTargets(processIds: readonly number[]): void {
+    this.targets = [...processIds]
     this.media.configure(processIds)
+  }
+
+  async speak(text: string, signal: AbortSignal): Promise<void> {
+    const provider = await this.selectProvider()
+    if (provider === undefined) throw new Error('没有可用的语音合成 Provider，请先在 DSH 中绑定相应凭据')
+    const audio = await provider.synthesize({ text }, signal)
+    this.media.play(audio)
   }
 
   private async onMediaEvent(event: MediaHostEvent): Promise<void> {
@@ -69,8 +78,7 @@ export class SpeechController {
       }, controller.signal)
       this.handler.transcriptReady(event.processId, transcript)
       const reply = await this.handler.respond(event.processId, transcript, controller.signal)
-      const audio = await provider.synthesize({ text: reply }, controller.signal)
-      this.media.play(audio)
+      await this.speak(reply, controller.signal)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       this.handler.failed(event.processId, message)

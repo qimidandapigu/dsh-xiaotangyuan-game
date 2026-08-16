@@ -29,7 +29,7 @@ TrinketTinker 1.9.0
 XiaoTangYuan Companion 0.5.0
 ```
 
-如果出现 `multiple copies of this mod installed`，说明 `Mods` 中存在同一 `UniqueID` 的多个目录。先升级 Harness 插件到 `0.5.1`，然后再次让 Harness 执行检测和安装；它会把小汤圆管理的旧备份迁移到：
+如果出现 `multiple copies of this mod installed`，说明 `Mods` 中存在同一 `UniqueID` 的多个目录。先升级 Harness 插件到 `0.5.1` 或更新版本，然后再次让 Harness 执行检测和安装；它会把小汤圆管理的旧备份迁移到：
 
 ```text
 <Stardew Valley>\.xiaotangyuan-backups
@@ -43,7 +43,7 @@ XiaoTangYuan Companion 0.5.0
 
 1. 游戏已经进入存档，不是在标题界面加载 MOD 的中间阶段。
 2. 星露谷窗口在前台；媒体 Host 会核对前台进程 ID。
-3. Harness 正在运行，并且插件版本是 `0.5.1`。
+3. Harness 正在运行，并且插件版本是 `0.5.1` 或更新版本；饥荒链路要求 `0.6.1`。
 4. `127.0.0.1:32145` 正在监听。
 5. Windows 默认录音设备可用，且没有被独占。
 6. `media.enabled` 与 `speech.enabled` 没有关闭。
@@ -101,11 +101,58 @@ XiaoTangYuan Companion
 
 Gateway 只绑定本机回环地址。若 `32145` 被占用，检查是否同时安装或启动了旧的 `@qimidandapigu/dsh-game-agent`。
 
+## 饥荒启动时报 `jingling.zip` 缺失
+
+典型错误是：
+
+```text
+Could not find an asset matching anim/jingling.zip
+```
+
+这表示只更新了 Lua 文件，或安装包在复制过程中不完整。不要从别处单独复制 `modmain.lua`；重新让 Harness 安装当前饥荒包，并确认以下文件存在：
+
+```text
+<DST>\mods\dont-starve-ai-mod\anim\jingling.zip
+<DST>\mods\dont-starve-ai-mod\ChesterAI.exe
+```
+
+当前 Mod 有安全回退，动画缺失时应显示原版切斯特而不是阻止游戏启动；如果仍出现该崩溃，说明加载的不是 `0.2.18` 或更新版本。检查 `client_log.txt` 中的 Mod 版本和实际 Mod 路径。
+
+## 饥荒能启动，但仍是原版切斯特
+
+1. 必须进入世界并生成切斯特；标题界面不会创建 `Jingling` 显示实体。
+2. 检查 `anim/jingling.zip` 是否存在。
+3. 在 `client_log.txt` 中搜索 `Jingling visual installed for Chester`。
+4. 如果日志只显示 Mod 加载成功而没有该行，先确认当前世界确实存在切斯特。
+
+## 饥荒从 Steam 启动但 Adapter 没连接
+
+Steam 启动项必须是一整行，并保留 `%command%`：
+
+```text
+"<DST>\mods\dont-starve-ai-mod\ChesterAI.exe" %command%
+```
+
+平时先启动 Harness，再从 Steam 启动游戏。直接双击 `dontstarve_steam_x64.exe` 会绕过 Adapter 启动器。
+
+## 自动反馈没有生成 Issue
+
+只有模型判断为明确产品建议时才调用 `game_feedback_submit`。如果已经调用但提交失败，依次检查：
+
+1. `feedback.enabled` 是否为 `true`。
+2. `feedback.endpoint` 是否指向已部署的接收端。
+3. `feedback.credentialRef` 是否能从 DSH 凭据库解析。
+4. 接收端是否配置 GitHub Token、目标仓库和与客户端一致的 HMAC 密钥。
+5. 请求时间是否偏差过大，或 nonce 是否被判定为重放。
+
+不要把 GitHub Token 放进 Harness 对话、游戏 Mod 或公开日志。
+
 ## 提交问题时需要的信息
 
 请提供：
 
 - Harness 插件版本。
+- 游戏名称、游戏 Mod/Adapter 版本和安装方式。
 - `StardewAgentMod`、Content Patcher、TrinketTinker 和外观包版本。
 - `SMAPI-latest.txt` 中从“Loading mods”到“Mods loaded and ready”的相关片段。
 - 按 `T`、按住 `V`、松开 `V` 分别出现什么现象。

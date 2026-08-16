@@ -2,6 +2,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, type FinishReason, type LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import screenshot from 'screenshot-desktop'
 import type { ResolvedConfig } from '../../config.js'
+import { WindowsMediaHost } from '../media/windows-media-host.js'
+import type { BinaryAsset } from '../providers/contracts.js'
 
 interface ModelRoute {
   provider: string
@@ -22,6 +24,7 @@ export class MultimodalRouter {
   constructor(
     private readonly ctx: Context,
     private readonly config: ResolvedConfig['vision'],
+    private readonly media: WindowsMediaHost,
   ) {}
 
   private async findImageModel(signal: AbortSignal): Promise<ModelRoute | undefined> {
@@ -53,14 +56,17 @@ export class MultimodalRouter {
     return undefined
   }
 
-  async observeForeground(signal: AbortSignal): Promise<string | undefined> {
+  async observeProcess(processId: number | undefined, signal: AbortSignal): Promise<string | undefined> {
     if (!this.config.enabled) return undefined
     const route = await this.findImageModel(signal)
     if (route === undefined) return undefined
 
-    const png = await screenshot({ format: 'png' })
+    const image: BinaryAsset = processId === undefined
+      ? { bytes: new Uint8Array(await screenshot({ format: 'png' })), mediaType: 'image/png' }
+      : await this.media.captureProcessWindow(processId, this.config.maxWidth, signal)
+    if (image.mediaType !== 'image/png') throw new Error(`Windows 媒体服务返回了不支持的截图格式：${image.mediaType}`)
     const attachment = await this.ctx.attachments.saveImage({
-      data: new Uint8Array(png),
+      data: image.bytes,
       mediaType: 'image/png',
       name: 'game-window.png',
     })
@@ -88,5 +94,9 @@ export class MultimodalRouter {
 
     const result = text.trim()
     return result === '' ? undefined : result
+  }
+
+  async observeForeground(signal: AbortSignal): Promise<string | undefined> {
+    return await this.observeProcess(undefined, signal)
   }
 }

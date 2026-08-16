@@ -1,0 +1,9 @@
+{
+  "HarnessBridgeRoot": "",
+  "AutoChatEnabled": true,
+  "AutoChatIntervalSeconds": 60,
+  "DangerAlertsEnabled": true,
+  "DangerAlertCooldownSeconds": 45,
+  "FairyRightOffset": 520,
+  "FairyTopOffset": 100
+}

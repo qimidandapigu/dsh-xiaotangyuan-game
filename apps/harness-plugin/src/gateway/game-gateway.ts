@@ -3,6 +3,7 @@ import WebSocket, { WebSocketServer, type RawData } from 'ws'
 import {
   readAdapterHello,
   readGameChat,
+  readGameRetry,
   readStateUpdate,
   type AdapterHello,
   type GameChatContext,
@@ -30,6 +31,8 @@ export class GameGateway implements VoiceInteractionHandler {
     port: number,
     private readonly multimodal: MultimodalRouter,
     private readonly processTargetsChanged: (processIds: readonly number[]) => void,
+    private readonly feedbackEnabled: boolean,
+    private readonly speak: (text: string, signal: AbortSignal) => Promise<void>,
   ) {
     this.server = new WebSocketServer({ host, port, maxPayload: 1024 * 1024 })
     this.server.on('connection', socket => this.onConnection(socket))
@@ -98,7 +101,7 @@ export class GameGateway implements VoiceInteractionHandler {
       case 'adapter.hello': {
         if (state.session !== undefined) throw new Error('adapter.hello may only be sent once per connection')
         state.adapter = readAdapterHello(request.params)
-        state.session = new GameAgentSession(this.ctx, state.adapter, this.multimodal)
+        state.session = new GameAgentSession(this.ctx, state.adapter, this.multimodal, this.feedbackEnabled)
         this.publishProcessTargets()
         return { accepted: true, protocolVersion: '1.0' }
       }
@@ -109,6 +112,24 @@ export class GameGateway implements VoiceInteractionHandler {
         const chat = readGameChat(request.params)
         if (chat.context?.observation !== undefined) state.latestObservation = chat.context.observation
         return await state.session.ask(chat)
+      }
+      case 'chat.retry': {
+        if (state.session === undefined) throw new Error('adapter.hello must be sent before chat.retry')
+        const retry = readGameRetry(request.params)
+        if (retry.context?.observation !== undefined) state.latestObservation = retry.context.observation
+        const result = await state.session.retry(retry.context)
+        this.notify(state, 'assistant.present', { text: result.reply, source: 'retry' })
+        void this.speak(result.reply, AbortSignal.timeout(120_000)).catch(error => {
+          const message = error instanceof Error ? error.message : String(error)
+          this.notify(state, 'assistant.error', { message: `重试回复已生成，但语音播放失败：${message}` })
+        })
+        return result
+      }
+      case 'assistant.compose': {
+        if (state.session === undefined) throw new Error('adapter.hello must be sent before assistant.compose')
+        const chat = readGameChat(request.params)
+        if (chat.context?.observation !== undefined) state.latestObservation = chat.context.observation
+        return await state.session.compose(chat)
       }
       case 'state.update':
         state.latestObservation = readStateUpdate(request.params)

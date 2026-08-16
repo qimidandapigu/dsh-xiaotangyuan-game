@@ -1,14 +1,19 @@
 {
   "name": "dsh-xiaotangyuan-game-workspace",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.6.1",
   "description": "XiaoTangYuan Game AI monorepo.",
   "scripts": {
-    "build": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game build",
+    "build": "pnpm --filter @qimidandapigu/oni-adapter build && pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game build",
     "test": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game test",
-    "check": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game check",
+    "check": "pnpm --filter @qimidandapigu/oni-adapter check && pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game check",
+    "check:feedback": "pnpm --filter @qimidandapigu/xiaotangyuan-feedback-receiver check",
+    "check:all": "pnpm run check && pnpm run check:feedback",
     "pack:plugin": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game pack",
+    "pack:oni-adapter": "pnpm --filter @qimidandapigu/oni-adapter pack",
     "build:stardew": "dotnet build games/stardew-valley/adapter/StardewAgentMod.csproj -c Release",
+    "build:oni": "dotnet build games/oxygen-not-included/bridge/DoubaoAI.ONI.csproj -c Release",
+    "pack:oni": "powershell -NoProfile -ExecutionPolicy Bypass -File games/oxygen-not-included/bridge/tools/PackageRelease.ps1",
     "build:media": "dotnet publish apps/windows-media-host/XtyMediaHost.csproj -c Release -r win-x64 --self-contained true -o apps/harness-plugin/media/windows-x64"
   }
 }

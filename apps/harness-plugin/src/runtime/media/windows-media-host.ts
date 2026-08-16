@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { access } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
@@ -18,13 +19,29 @@ export type MediaHostEvent = {
   mediaType: string
   audioBase64: string
 } | {
+  type: 'capture.completed'
+  requestId: string
+  processId: number
+  mediaType: string
+  imageBase64: string
+  width: number
+  height: number
+} | {
   type: 'error'
+  requestId?: string | null
   message: string
+}
+
+interface PendingCapture {
+  resolve: (asset: BinaryAsset) => void
+  reject: (error: Error) => void
+  cleanup: () => void
 }
 
 export class WindowsMediaHost {
   private child?: ChildProcessWithoutNullStreams
   private readonly listeners = new Set<(event: MediaHostEvent) => void | Promise<void>>()
+  private readonly pendingCaptures = new Map<string, PendingCapture>()
 
   constructor(
     private readonly ctx: Context,
@@ -56,6 +73,7 @@ export class WindowsMediaHost {
     })
     child.on('exit', (code, signal) => {
       if (this.child === child) this.child = undefined
+      this.rejectPendingCaptures(new Error('Windows 媒体服务已退出'))
       if (code !== 0 && code !== null) {
         this.ctx.logger.warn('xiaotangyuan-game: 媒体服务退出，code=%s signal=%s', code, signal)
       }
@@ -76,6 +94,27 @@ export class WindowsMediaHost {
       this.ctx.logger.warn('xiaotangyuan-game: 媒体服务返回了无效 JSON')
       return
     }
+    if (event.type === 'capture.completed') {
+      const pending = this.pendingCaptures.get(event.requestId)
+      if (pending !== undefined) {
+        this.pendingCaptures.delete(event.requestId)
+        pending.cleanup()
+        pending.resolve({
+          bytes: new Uint8Array(Buffer.from(event.imageBase64, 'base64')),
+          mediaType: event.mediaType,
+        })
+      }
+      return
+    }
+    if (event.type === 'error' && event.requestId != null) {
+      const pending = this.pendingCaptures.get(event.requestId)
+      if (pending !== undefined) {
+        this.pendingCaptures.delete(event.requestId)
+        pending.cleanup()
+        pending.reject(new Error(event.message))
+      }
+      return
+    }
     for (const listener of this.listeners) {
       Promise.resolve(listener(event)).catch(error => {
         this.ctx.logger.warn('xiaotangyuan-game: 媒体事件处理失败')
@@ -84,9 +123,10 @@ export class WindowsMediaHost {
     }
   }
 
-  private send(method: string, params: unknown): void {
-    if (this.child?.stdin.writable !== true) return
+  private send(method: string, params: unknown): boolean {
+    if (this.child?.stdin.writable !== true) return false
     this.child.stdin.write(`${JSON.stringify({ method, params })}\n`)
+    return true
   }
 
   configure(processIds: readonly number[]): void {
@@ -101,9 +141,41 @@ export class WindowsMediaHost {
     this.send('play', { audioBase64: Buffer.from(audio.bytes).toString('base64') })
   }
 
+  async captureProcessWindow(processId: number, maxWidth: number, signal: AbortSignal): Promise<BinaryAsset> {
+    if (!Number.isInteger(processId) || processId <= 0) throw new Error('游戏 Adapter 没有提供有效的进程 ID')
+    signal.throwIfAborted()
+    const requestId = randomUUID()
+    return await new Promise<BinaryAsset>((resolve, reject) => {
+      const onAbort = (): void => {
+        const pending = this.pendingCaptures.get(requestId)
+        if (pending === undefined) return
+        this.pendingCaptures.delete(requestId)
+        pending.cleanup()
+        reject(signal.reason instanceof Error ? signal.reason : new Error('游戏窗口截图已取消'))
+      }
+      const cleanup = (): void => signal.removeEventListener('abort', onAbort)
+      this.pendingCaptures.set(requestId, { resolve, reject, cleanup })
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (!this.send('capture', { requestId, processId, maxWidth })) {
+        this.pendingCaptures.delete(requestId)
+        cleanup()
+        reject(new Error('Windows 媒体服务尚未启动'))
+      }
+    })
+  }
+
+  private rejectPendingCaptures(error: Error): void {
+    for (const pending of this.pendingCaptures.values()) {
+      pending.cleanup()
+      pending.reject(error)
+    }
+    this.pendingCaptures.clear()
+  }
+
   async close(): Promise<void> {
     const child = this.child
     this.child = undefined
+    this.rejectPendingCaptures(new Error('Windows 媒体服务正在关闭'))
     if (child === undefined) return
     if (child.stdin.writable) child.stdin.write(`${JSON.stringify({ method: 'shutdown', params: {} })}\n`)
     await new Promise<void>((resolve) => {

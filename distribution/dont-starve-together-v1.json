@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "tag": "dont-starve-v0.2.18",
+  "version": "0.2.18",
+  "archive": {
+    "name": "dsh-xiaotangyuan-game-dont-starve-0.2.18.zip",
+    "url": "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/dont-starve-v0.2.18/dsh-xiaotangyuan-game-dont-starve-0.2.18.zip",
+    "size": 16665431,
+    "sha256": "9534ba3d66f08b8d49f46613ce0c918e4156d0c7d504f4e7744862680b9828ca"
+  }
+}

@@ -7,6 +7,7 @@ export interface AdapterHello {
 }
 
 export interface GameChatContext {
+  roleInstructions?: string
   playerName?: string
   location?: string
   date?: string
@@ -17,6 +18,10 @@ export interface GameChatContext {
 
 export interface GameChatRequest {
   text: string
+  context?: GameChatContext
+}
+
+export interface GameRetryRequest {
   context?: GameChatContext
 }
 
@@ -53,20 +58,35 @@ export function readGameChat(value: unknown): GameChatRequest {
     throw new Error('text must be a non-empty string')
   }
 
-  let context: GameChatContext | undefined
-  if (params.context !== undefined) {
-    const source = asRecord(params.context)
-    context = {
-      playerName: optionalString(source, 'playerName'),
-      location: optionalString(source, 'location'),
-      date: optionalString(source, 'date'),
-      time: optionalString(source, 'time'),
-      nearbyNpc: optionalString(source, 'nearbyNpc'),
-      ...(source.observation === undefined ? {} : { observation: asRecord(source.observation) }),
-    }
-  }
+  const context = readContext(params.context)
 
   return { text: params.text.trim(), ...(context === undefined ? {} : { context }) }
+}
+
+function limitedOptionalString(record: Record<string, unknown>, key: string, maxLength: number): string | undefined {
+  const value = optionalString(record, key)
+  if (value !== undefined && value.length > maxLength) throw new Error(`${key} must be at most ${maxLength} characters`)
+  return value
+}
+
+export function readGameRetry(value: unknown): GameRetryRequest {
+  const params = asRecord(value)
+  const context = readContext(params.context)
+  return context === undefined ? {} : { context }
+}
+
+function readContext(value: unknown): GameChatContext | undefined {
+  if (value === undefined) return undefined
+  const source = asRecord(value)
+  return {
+    roleInstructions: limitedOptionalString(source, 'roleInstructions', 2_000),
+    playerName: optionalString(source, 'playerName'),
+    location: optionalString(source, 'location'),
+    date: optionalString(source, 'date'),
+    time: optionalString(source, 'time'),
+    nearbyNpc: optionalString(source, 'nearbyNpc'),
+    ...(source.observation === undefined ? {} : { observation: asRecord(source.observation) }),
+  }
 }
 
 export function readStateUpdate(value: unknown): Record<string, unknown> {

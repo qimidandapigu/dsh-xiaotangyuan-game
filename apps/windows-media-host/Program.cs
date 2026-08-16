@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -20,7 +23,96 @@ internal static class Protocol
         }
     }
 
-    public static void Error(string message) => Send(new { type = "error", message });
+    public static void Error(string message, string? requestId = null) => Send(new { type = "error", requestId, message });
+}
+
+internal sealed record WindowCapture(byte[] Png, int Width, int Height);
+
+internal static class WindowCaptureService
+{
+    public static void EnableDpiAwareness()
+    {
+        try { _ = SetProcessDpiAwarenessContext(new IntPtr(-4)); }
+        catch (EntryPointNotFoundException) { }
+    }
+
+    public static WindowCapture CaptureForegroundClient(int expectedProcessId, int maxWidth)
+    {
+        IntPtr window = GetForegroundWindow();
+        if (window == IntPtr.Zero) throw new InvalidOperationException("当前没有前台窗口");
+        _ = GetWindowThreadProcessId(window, out uint actualProcessId);
+        if (actualProcessId != unchecked((uint)expectedProcessId))
+        {
+            throw new InvalidOperationException("目标游戏当前不是前台窗口");
+        }
+        if (!IsWindowVisible(window) || IsIconic(window))
+        {
+            throw new InvalidOperationException("目标游戏窗口不可见或已最小化");
+        }
+        if (!GetClientRect(window, out Rect client) || client.Right <= client.Left || client.Bottom <= client.Top)
+        {
+            throw new InvalidOperationException($"无法读取目标游戏客户区，Win32={Marshal.GetLastWin32Error()}");
+        }
+
+        var origin = new Point { X = client.Left, Y = client.Top };
+        if (!ClientToScreen(window, ref origin))
+        {
+            throw new InvalidOperationException($"无法定位目标游戏客户区，Win32={Marshal.GetLastWin32Error()}");
+        }
+
+        int width = client.Right - client.Left;
+        int height = client.Bottom - client.Top;
+        using var source = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+        using (Graphics graphics = Graphics.FromImage(source))
+        {
+            graphics.CopyFromScreen(origin.X, origin.Y, 0, 0, new Size(width, height), CopyPixelOperation.SourceCopy);
+        }
+
+        int outputWidth = Math.Min(width, maxWidth);
+        int outputHeight = Math.Max(1, (int)Math.Round(height * (outputWidth / (double)width)));
+        using Bitmap output = outputWidth == width
+            ? new Bitmap(source)
+            : Resize(source, outputWidth, outputHeight);
+        using var stream = new MemoryStream();
+        output.Save(stream, ImageFormat.Png);
+        return new WindowCapture(stream.ToArray(), output.Width, output.Height);
+    }
+
+    private static Bitmap Resize(Bitmap source, int width, int height)
+    {
+        var resized = new Bitmap(width, height, PixelFormat.Format24bppRgb);
+        using Graphics graphics = Graphics.FromImage(resized);
+        graphics.CompositingQuality = CompositingQuality.HighQuality;
+        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        graphics.SmoothingMode = SmoothingMode.HighQuality;
+        graphics.DrawImage(source, 0, 0, width, height);
+        return resized;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Point { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(IntPtr window, out Rect rect);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ClientToScreen(IntPtr window, ref Point point);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr window);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 }
 
 internal sealed class AudioDevices : IDisposable
@@ -174,6 +266,11 @@ internal sealed class PushToTalkHook : IDisposable
         }
     }
 
+    public bool AllowsProcess(int processId)
+    {
+        lock (this.gate) return this.allowedProcesses.Contains(processId);
+    }
+
     private void Run()
     {
         this.threadId = GetCurrentThreadId();
@@ -202,7 +299,7 @@ internal sealed class PushToTalkHook : IDisposable
             bool up = message == (IntPtr)WmKeyUp || message == (IntPtr)WmSysKeyUp;
             int configuredKey;
             lock (this.gate) configuredKey = this.virtualKey;
-            if (key == configuredKey && down && !this.keyHeld)
+            if (key == configuredKey && down && !this.keyHeld && !HasModifierKey())
             {
                 int foregroundProcess = ForegroundProcessId();
                 bool allowed;
@@ -223,6 +320,13 @@ internal sealed class PushToTalkHook : IDisposable
         }
         return CallNextHookEx(this.hook, code, message, data);
     }
+
+    private static bool HasModifierKey()
+    {
+        return IsKeyDown(0x10) || IsKeyDown(0x11) || IsKeyDown(0x12);
+    }
+
+    private static bool IsKeyDown(int virtualKey) => (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
 
     private static int ForegroundProcessId()
     {
@@ -275,6 +379,8 @@ internal sealed class PushToTalkHook : IDisposable
     private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr GetModuleHandle(string? moduleName);
     [DllImport("kernel32.dll")]
@@ -287,6 +393,7 @@ internal static class Program
     {
         Console.InputEncoding = Encoding.UTF8;
         Console.OutputEncoding = new UTF8Encoding(false);
+        WindowCaptureService.EnableDpiAwareness();
         using var audio = new AudioDevices();
         using var hook = new PushToTalkHook(audio);
         Protocol.Send(new { type = "ready", version = "1.0" });
@@ -318,6 +425,34 @@ internal static class Program
                         {
                             if (task.Exception is not null) Protocol.Error($"音频播放失败：{task.Exception.GetBaseException().Message}");
                         }, TaskScheduler.Default);
+                        break;
+                    }
+                    case "capture":
+                    {
+                        string requestId = parameters.GetProperty("requestId").GetString()
+                            ?? throw new InvalidOperationException("capture.requestId 不能为空");
+                        try
+                        {
+                            int processId = parameters.GetProperty("processId").GetInt32();
+                            int maxWidth = parameters.GetProperty("maxWidth").GetInt32();
+                            if (!hook.AllowsProcess(processId)) throw new InvalidOperationException("该进程没有注册为游戏 Adapter");
+                            if (maxWidth < 320 || maxWidth > 3840) throw new InvalidOperationException("maxWidth 必须在 320 到 3840 之间");
+                            WindowCapture capture = WindowCaptureService.CaptureForegroundClient(processId, maxWidth);
+                            Protocol.Send(new
+                            {
+                                type = "capture.completed",
+                                requestId,
+                                processId,
+                                mediaType = "image/png",
+                                imageBase64 = Convert.ToBase64String(capture.Png),
+                                width = capture.Width,
+                                height = capture.Height
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            Protocol.Error($"游戏窗口截图失败：{ex.Message}", requestId);
+                        }
                         break;
                     }
                     case "shutdown":

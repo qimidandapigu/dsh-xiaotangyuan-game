@@ -7,11 +7,31 @@ describe('game runtime configuration', () => {
   it('defaults to mandatory multimodal and speech capabilities without embedding secrets', () => {
     const config = resolveConfig()
     expect(config.vision.enabled).toBe(true)
+    expect(config.vision.maxWidth).toBe(1280)
     expect(config.speech.enabled).toBe(true)
     expect(config.speech.provider).toBe('auto')
     expect(config.speech.credentialRef).toBe('VOLCENGINE_API_KEY')
     expect(config.media.pushToTalkVirtualKey).toBe(0x56)
     expect(JSON.stringify(config)).not.toContain('apiKey')
+  })
+
+  it('rejects an unsafe screenshot width', () => {
+    expect(() => resolveConfig({ vision: { maxWidth: 200 } })).toThrow('vision.maxWidth')
+  })
+
+  it('requires a complete, checksummed local Dont Starve installer override', () => {
+    expect(() => resolveConfig({
+      installers: { dontStarve: { archivePath: 'F:\\package.zip' } },
+    })).toThrow('archivePath, archiveVersion, and archiveSha256')
+    expect(resolveConfig({
+      installers: {
+        dontStarve: {
+          archivePath: 'F:\\package.zip',
+          archiveVersion: '0.2.17',
+          archiveSha256: 'a'.repeat(64),
+        },
+      },
+    }).installers.dontStarve.archiveVersion).toBe('0.2.17')
   })
 })
 
