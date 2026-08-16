@@ -18,7 +18,7 @@
 ## 安装
 
 ```powershell
-dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.4.0/qimidandapigu-dsh-xiaotangyuan-game-0.4.0.tgz"
+dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.4.1/qimidandapigu-dsh-xiaotangyuan-game-0.4.1.tgz"
 ```
 
 重启 Harness 后即可通过对话让小汤圆检测并安装各游戏的适配器。星露谷物语的请求示例：`小汤圆，帮我检测并安装星露谷物语的 AI MOD`。

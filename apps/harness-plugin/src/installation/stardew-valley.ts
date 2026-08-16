@@ -18,10 +18,13 @@ import extract from 'extract-zip'
 
 const execFileAsync = promisify(execFile)
 const RELEASES_API = 'https://api.github.com/repos/qimidandapigu/dsh-xiaotangyuan-game/releases?per_page=50'
+const DISTRIBUTION_MANIFEST_URL = 'https://raw.githubusercontent.com/qimidandapigu/dsh-xiaotangyuan-game/main/distribution/stardew-valley.json'
+const RELEASE_DOWNLOAD_PREFIX = 'https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/'
 const STARDEW_RELEASE_PREFIX = 'stardew-v'
 const MINIMUM_ADAPTER_VERSION = '0.3.0'
 const STARDEW_ASSET_PREFIX = 'dsh-xiaotangyuan-game-stardew-'
 const MOD_FOLDER_NAME = 'StardewAgentMod'
+const MAX_ARCHIVE_SIZE = 50 * 1024 * 1024
 
 interface ReleaseAsset {
   name: string
@@ -33,6 +36,20 @@ export interface GithubRelease {
   tag_name: string
   assets: ReleaseAsset[]
   draft?: boolean
+}
+
+export interface StardewDistributionManifest {
+  schemaVersion: 1
+  tag: string
+  version: string
+  archive: ReleaseAsset & { sha256: string }
+}
+
+interface InstallableStardewRelease {
+  tagName: string
+  archive: ReleaseAsset
+  expectedSha256?: string
+  checksumAsset?: ReleaseAsset
 }
 
 interface ModManifest {
@@ -231,13 +248,85 @@ export function isCompatibleStardewRelease(tag: string): boolean {
   return true
 }
 
-async function latestRelease(signal: AbortSignal): Promise<GithubRelease> {
+export function parseStardewDistributionManifest(value: unknown): StardewDistributionManifest {
+  if (typeof value !== 'object' || value === null) throw new Error('星露谷发布清单不是对象')
+  const record = value as Partial<StardewDistributionManifest>
+  if (record.schemaVersion !== 1) throw new Error('星露谷发布清单版本不受支持')
+  if (typeof record.tag !== 'string' || !isCompatibleStardewRelease(record.tag)) {
+    throw new Error('星露谷发布清单包含无效或不兼容的版本标签')
+  }
+  const version = record.tag.slice(STARDEW_RELEASE_PREFIX.length)
+  if (record.version !== version) throw new Error('星露谷发布清单的版本与标签不一致')
+  if (typeof record.archive !== 'object' || record.archive === null) {
+    throw new Error('星露谷发布清单缺少安装包')
+  }
+  const archive = record.archive as Partial<StardewDistributionManifest['archive']>
+  if (typeof archive.name !== 'string'
+    || !archive.name.startsWith(STARDEW_ASSET_PREFIX)
+    || !archive.name.endsWith('.zip')) {
+    throw new Error('星露谷发布清单包含无效的安装包名称')
+  }
+  const expectedUrl = `${RELEASE_DOWNLOAD_PREFIX}${record.tag}/${archive.name}`
+  if (archive.url !== expectedUrl) throw new Error('星露谷发布清单包含非官方安装地址')
+  if (typeof archive.size !== 'number'
+    || !Number.isSafeInteger(archive.size)
+    || archive.size <= 0
+    || archive.size > MAX_ARCHIVE_SIZE) {
+    throw new Error('星露谷发布清单包含无效的安装包大小')
+  }
+  if (typeof archive.sha256 !== 'string' || !/^[a-fA-F0-9]{64}$/.test(archive.sha256)) {
+    throw new Error('星露谷发布清单包含无效的 SHA-256')
+  }
+  return {
+    schemaVersion: 1,
+    tag: record.tag,
+    version,
+    archive: {
+      name: archive.name,
+      url: archive.url,
+      size: archive.size,
+      sha256: archive.sha256.toLowerCase(),
+    },
+  }
+}
+
+async function releaseFromManifest(signal: AbortSignal): Promise<InstallableStardewRelease> {
+  const value: unknown = await (await fetchChecked(DISTRIBUTION_MANIFEST_URL, signal, 'application/json')).json()
+  const manifest = parseStardewDistributionManifest(value)
+  return {
+    tagName: manifest.tag,
+    archive: manifest.archive,
+    expectedSha256: manifest.archive.sha256,
+  }
+}
+
+async function releaseFromGithubApi(signal: AbortSignal): Promise<InstallableStardewRelease> {
   const value: unknown = await (await fetchChecked(RELEASES_API, signal)).json()
   const release = selectStardewRelease(value)
   if (!isCompatibleStardewRelease(release.tag_name)) {
     throw new Error(`最新星露谷适配器 ${release.tag_name} 低于当前插件要求的 ${STARDEW_RELEASE_PREFIX}${MINIMUM_ADAPTER_VERSION}，已拒绝安装旧演示版`)
   }
-  return release
+  const archive = release.assets.find(asset => asset.name.startsWith(STARDEW_ASSET_PREFIX) && asset.name.endsWith('.zip'))
+  const checksumAsset = release.assets.find(asset => asset.name === 'SHA256SUMS.txt')
+  if (archive === undefined || checksumAsset === undefined) {
+    throw new Error('latest XiaoTangYuan Stardew release is missing its zip or SHA256SUMS.txt')
+  }
+  return { tagName: release.tag_name, archive, checksumAsset }
+}
+
+async function latestRelease(signal: AbortSignal): Promise<InstallableStardewRelease> {
+  try {
+    return await releaseFromManifest(signal)
+  } catch (manifestError) {
+    if (signal.aborted) throw manifestError
+    try {
+      return await releaseFromGithubApi(signal)
+    } catch (apiError) {
+      const manifestMessage = manifestError instanceof Error ? manifestError.message : String(manifestError)
+      const apiMessage = apiError instanceof Error ? apiError.message : String(apiError)
+      throw new Error(`无法读取星露谷安装源。静态清单：${manifestMessage}；GitHub API：${apiMessage}`)
+    }
+  }
 }
 
 function safeChild(parent: string, child: string): void {
@@ -268,21 +357,21 @@ export async function installStardewMod(
   }
 
   const release = await latestRelease(signal)
-  const zipAsset = release.assets.find(asset => asset.name.startsWith(STARDEW_ASSET_PREFIX) && asset.name.endsWith('.zip'))
-  const checksumAsset = release.assets.find(asset => asset.name === 'SHA256SUMS.txt')
-  if (zipAsset === undefined || checksumAsset === undefined) {
-    throw new Error('latest XiaoTangYuan Stardew release is missing its zip or SHA256SUMS.txt')
-  }
-  if (zipAsset.size > 50 * 1024 * 1024) throw new Error('refusing MOD archive larger than 50 MiB')
+  const zipAsset = release.archive
+  if (zipAsset.size > MAX_ARCHIVE_SIZE) throw new Error('refusing MOD archive larger than 50 MiB')
 
   const tempRoot = await mkdtemp(join(tmpdir(), 'dsh-xiaotangyuan-game-'))
   try {
     const archivePath = join(tempRoot, basename(zipAsset.name))
     const archive = new Uint8Array(await (await fetchChecked(zipAsset.url, signal, 'application/octet-stream')).arrayBuffer())
-    if (archive.byteLength > 50 * 1024 * 1024) throw new Error('downloaded MOD archive exceeds 50 MiB')
-    const checksumText = await (await fetchChecked(checksumAsset.url, signal, 'application/octet-stream')).text()
-    const expected = checksumLine(checksumText, zipAsset.name)
-    if (expected === undefined) throw new Error(`SHA256SUMS.txt has no entry for ${zipAsset.name}`)
+    if (archive.byteLength > MAX_ARCHIVE_SIZE) throw new Error('downloaded MOD archive exceeds 50 MiB')
+    let expected = release.expectedSha256
+    if (expected === undefined) {
+      if (release.checksumAsset === undefined) throw new Error('星露谷发布信息缺少 SHA-256 校验值')
+      const checksumText = await (await fetchChecked(release.checksumAsset.url, signal, 'application/octet-stream')).text()
+      expected = checksumLine(checksumText, zipAsset.name)
+      if (expected === undefined) throw new Error(`SHA256SUMS.txt has no entry for ${zipAsset.name}`)
+    }
     const actual = createHash('sha256').update(archive).digest('hex')
     if (actual !== expected) throw new Error(`MOD checksum mismatch: expected ${expected}, received ${actual}`)
     await writeFile(archivePath, archive)
