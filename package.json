@@ -1,75 +1,14 @@
 {
-  "name": "@qimidandapigu/dsh-xiaotangyuan-game",
-  "version": "0.3.0",
-  "description": "XiaoTangYuan game AI integration for DeepSeek Harness.",
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "dist",
-    "cordis.patch.yml",
-    "README.md",
-    "LICENSE"
-  ],
+  "name": "dsh-xiaotangyuan-game-workspace",
+  "private": true,
+  "version": "0.4.0",
+  "description": "XiaoTangYuan Game AI monorepo.",
   "scripts": {
-    "build": "pnpm run clean && tsc -p tsconfig.json",
-    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "test": "vitest run",
-    "check": "pnpm run build && pnpm run test"
-  },
-  "keywords": [
-    "deepseek-harness",
-    "dsh-plugin",
-    "xiaotangyuan",
-    "game-ai",
-    "game-agent",
-    "stardew-valley"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/qimidandapigu/dsh-xiaotangyuan-game.git"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "license": "MIT",
-  "engines": {
-    "node": ">=22.19"
-  },
-  "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    }
-  },
-  "dependencies": {
-    "extract-zip": "^2.0.1",
-    "ws": "^8.18.3"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-agent-default-model": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
-  },
-  "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-agent": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-agent-default-model": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-session": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
-    "@types/node": "^24.10.0",
-    "@types/ws": "^8.18.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "build": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game build",
+    "test": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game test",
+    "check": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game check",
+    "pack:plugin": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game pack",
+    "build:stardew": "dotnet build games/stardew-valley/adapter/StardewAgentMod.csproj -c Release",
+    "build:media": "dotnet publish apps/windows-media-host/XtyMediaHost.csproj -c Release -r win-x64 --self-contained true -o apps/harness-plugin/media/windows-x64"
   }
 }

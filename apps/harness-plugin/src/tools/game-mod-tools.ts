@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { detectStardew, installStardewMod } from './games/stardew-valley/installer.js'
+import { detectStardew, installStardewMod } from '../installation/stardew-valley.js'
 
 const detectionSchema = {
   type: 'object',

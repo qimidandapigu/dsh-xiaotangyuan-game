@@ -8,10 +8,7 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "outDir": "dist",
-    "rootDir": "src",
     "skipLibCheck": true,
     "verbatimModuleSyntax": true
-  },
-  "include": ["src/**/*.ts"]
+  }
 }

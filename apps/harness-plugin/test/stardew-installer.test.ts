@@ -4,9 +4,10 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   inspectStardewPath,
+  isCompatibleStardewRelease,
   parseSteamLibraryPaths,
   selectStardewRelease,
-} from '../src/games/stardew-valley/installer.js'
+} from '../src/installation/stardew-valley.js'
 
 const temporaryPaths: string[] = []
 
@@ -53,9 +54,10 @@ describe('selectStardewRelease', () => {
   it('selects the newest Stardew release and skips plugin releases', () => {
     expect(selectStardewRelease([
       { tag_name: 'plugin-v0.3.0', draft: false, assets: [] },
+      { tag_name: 'stardew-v0.3.0', draft: false, assets: [{ name: 'mod.zip', url: 'https://example.test', size: 1 }] },
       { tag_name: 'stardew-v0.2.0', draft: false, assets: [{ name: 'mod.zip', url: 'https://example.test', size: 1 }] },
       { tag_name: 'stardew-v0.1.0', draft: false, assets: [] },
-    ]).tag_name).toBe('stardew-v0.2.0')
+    ]).tag_name).toBe('stardew-v0.3.0')
   })
 
   it('rejects a list with no published Stardew release', () => {
@@ -63,5 +65,11 @@ describe('selectStardewRelease', () => {
       { tag_name: 'stardew-v0.2.0', draft: true, assets: [] },
       { tag_name: 'plugin-v0.3.0', draft: false, assets: [] },
     ])).toThrow('no Stardew Valley release')
+  })
+
+  it('rejects releases older than the first Harness-owned voice adapter', () => {
+    expect(isCompatibleStardewRelease('stardew-v0.2.0')).toBe(false)
+    expect(isCompatibleStardewRelease('stardew-v0.3.0')).toBe(true)
+    expect(isCompatibleStardewRelease('stardew-v1.0.0')).toBe(true)
   })
 })

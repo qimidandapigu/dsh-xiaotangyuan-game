@@ -1,63 +1,77 @@
 # dsh-xiaotangyuan-game
 
-**小汤圆游戏 AI（XiaoTangYuan Game AI）** is a single-repository DeepSeek Harness integration for game MOD installation and model-backed in-game agents.
+小汤圆游戏 AI 的单仓库。DeepSeek Harness 插件承载通用 AI、语音、多模态、结构化处理和工程运行时；每个游戏只保留必须调用游戏 API 的薄适配器。
 
 ```text
-Game MOD
-  -> ws://127.0.0.1:32145 (JSON-RPC 2.0)
-  -> dsh-xiaotangyuan-game
-  -> DeepSeek Harness Agent
-  -> reply shown inside the game
+麦克风 / 游戏窗口 / 游戏事件
+              |
+              v
+apps/harness-plugin          一套可复用的重型运行时
+  Agent + 上下文 + 工具 + Provider 调度
+  多模态 + ASR + TTS + 主机媒体能力
+              |
+              v  protocol/v1
+games/*/adapter              少量游戏专属桥接代码
+  读取游戏状态 + 执行动作 + 游戏内界面
 ```
 
-The Harness plugin contains the gateway, installer tools, and game integration logic. Game MOD binaries are not bundled into the plugin; they are downloaded on demand from game-specific releases in this repository.
+智谱、豆包或其他服务只是可替换的 Provider。产品要求的是多模态理解、语音识别、语音合成、麦克风采集和音频播放能力，不把核心架构绑定到某个厂商。
 
-## Repository layout
+## 仓库目录
 
 ```text
-src/                       DeepSeek Harness plugin and shared runtime
-src/games/stardew-valley/  Harness-side detection and installation
-test/                      TypeScript tests
-games/stardew-valley/      Stardew Valley SMAPI MOD source
+apps/
+  harness-plugin/            发布给 DeepSeek Harness 的插件
+    src/gateway/             适配器连接与请求路由
+    src/runtime/agent/       Harness Agent 会话
+    src/runtime/providers/   与厂商无关的能力接口
+    src/installation/        游戏适配器检测与安装
+    src/tools/               暴露给模型的 Harness 工具
+    src/protocol/            Gateway 使用的协议解析代码
+    test/                    插件测试
+protocol/
+  v1/                        与语言无关的适配器协议
+games/
+  stardew-valley/
+    adapter/                 轻量 SMAPI 桥接
+docs/                        架构和职责说明
 ```
 
-Additional games will be added under `games/` without creating another repository.
+以后新增游戏时统一放在 `games/` 下，不再为每个游戏创建独立仓库，也不重复开发模型调用、语音、记忆或媒体基础设施。
 
-## Install the Harness plugin
+## 安装
+
+首次将小汤圆插件安装到 DeepSeek Harness：
 
 ```powershell
-dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.3.0/qimidandapigu-dsh-xiaotangyuan-game-0.3.0.tgz"
-dsh web
+dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.4.0/qimidandapigu-dsh-xiaotangyuan-game-0.4.0.tgz"
 ```
 
-If the earlier `@qimidandapigu/dsh-game-agent` package is installed, remove it before adding this renamed package so that two gateways do not compete for port `32145`.
-
-Then tell DeepSeek Harness:
+重启 Harness、刷新页面并新建对话，然后说：
 
 ```text
-小汤圆，帮我检测并安装星露谷 AI MOD
+小汤圆，帮我检测并安装星露谷物语的 AI MOD
 ```
 
-The model calls `game_mod_detect` and `game_mod_install`. The installer finds Steam and SMAPI, downloads the latest `stardew-v*` release, verifies `SHA256SUMS.txt`, backs up an existing installation, and validates the installed manifest.
+插件会调用 `game_mod_detect` 和 `game_mod_install`，检测 Steam、星露谷与 SMAPI，下载 `stardew-v0.3.0` 安装包，校验 SHA-256，备份旧版本并安装到游戏的 `Mods/StardewAgentMod` 目录。游戏适配器没有内置在插件包里，而是由插件在收到安装请求后从同一仓库的独立 Release 下载。
 
-## Develop
+如果已经安装过旧的 `@qimidandapigu/dsh-game-agent`，请先移除它，避免两个 Gateway 同时占用 `32145` 端口。
 
-Requirements: Node.js 22.19+, pnpm, .NET SDK, Stardew Valley, and SMAPI.
+## 常用命令
 
 ```powershell
 pnpm install
 pnpm check
-dotnet build games/stardew-valley/StardewAgentMod.csproj -c Release
+pnpm build:stardew
+pnpm pack:plugin
 ```
 
-Automatic MOD deployment is disabled during builds.
+发布的插件包名仍为 `@qimidandapigu/dsh-xiaotangyuan-game`。游戏适配器二进制文件使用独立的 Release 安装包；用户在 Harness 中提出安装请求后，由插件按需下载。
 
-## Protocol
+## 当前状态
 
-The game MOD connects to `ws://127.0.0.1:32145`, calls `adapter.hello`, and sends `chat.send` JSON-RPC requests. The result contains `reply` and `sessionId`.
+`0.4.0` 已实现 Harness Gateway、结构化星露谷状态、多模态模型自动选择、DSH 凭据驱动的语音 Provider，以及随插件分发的 Windows 麦克风与音频播放 Host。日记、主动对话、关系任务和完整游戏动作仍在后续迁移范围内。
 
-Version `0.3.0` supports complete text replies and Stardew Valley MOD installation. Token streaming, voice, screenshots, and in-game action tools are future work.
-
-## License
+## 许可证
 
 MIT
