@@ -1,0 +1,15 @@
+- insert:
+    - id: xiaotangyuan-game
+      name: '@qimidandapigu/dsh-xiaotangyuan-game'
+      config:
+        host: 127.0.0.1
+        port: 32145
+        vision:
+          enabled: true
+        speech:
+          enabled: true
+          provider: auto
+          credentialRef: VOLCENGINE_API_KEY
+        media:
+          enabled: true
+          pushToTalkVirtualKey: 86

@@ -6,6 +6,7 @@ coverage/
 .env
 **/bin/
 **/obj/
+apps/harness-plugin/media/
 **/*.user
 **/*.suo
 **/.vs/

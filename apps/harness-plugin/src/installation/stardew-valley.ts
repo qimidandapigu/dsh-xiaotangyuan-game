@@ -19,6 +19,7 @@ import extract from 'extract-zip'
 const execFileAsync = promisify(execFile)
 const RELEASES_API = 'https://api.github.com/repos/qimidandapigu/dsh-xiaotangyuan-game/releases?per_page=50'
 const STARDEW_RELEASE_PREFIX = 'stardew-v'
+const MINIMUM_ADAPTER_VERSION = '0.3.0'
 const STARDEW_ASSET_PREFIX = 'dsh-xiaotangyuan-game-stardew-'
 const MOD_FOLDER_NAME = 'StardewAgentMod'
 
@@ -213,9 +214,30 @@ export function selectStardewRelease(value: unknown): GithubRelease {
   return release
 }
 
+function numericVersion(value: string): readonly number[] | undefined {
+  const match = value.match(/^(\d+)\.(\d+)\.(\d+)$/)
+  return match === null ? undefined : [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
+export function isCompatibleStardewRelease(tag: string): boolean {
+  if (!tag.startsWith(STARDEW_RELEASE_PREFIX)) return false
+  const actual = numericVersion(tag.slice(STARDEW_RELEASE_PREFIX.length))
+  const minimum = numericVersion(MINIMUM_ADAPTER_VERSION)
+  if (actual === undefined || minimum === undefined) return false
+  for (let index = 0; index < minimum.length; index += 1) {
+    if (actual[index]! > minimum[index]!) return true
+    if (actual[index]! < minimum[index]!) return false
+  }
+  return true
+}
+
 async function latestRelease(signal: AbortSignal): Promise<GithubRelease> {
   const value: unknown = await (await fetchChecked(RELEASES_API, signal)).json()
-  return selectStardewRelease(value)
+  const release = selectStardewRelease(value)
+  if (!isCompatibleStardewRelease(release.tag_name)) {
+    throw new Error(`最新星露谷适配器 ${release.tag_name} 低于当前插件要求的 ${STARDEW_RELEASE_PREFIX}${MINIMUM_ADAPTER_VERSION}，已拒绝安装旧演示版`)
+  }
+  return release
 }
 
 function safeChild(parent: string, child: string): void {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { failure, parseRpcRequest, success } from '../src/protocol.js'
+import { failure, parseRpcRequest, success } from '../src/protocol/json-rpc.js'
 
 describe('JSON-RPC protocol', () => {
   it('parses a valid request', () => {

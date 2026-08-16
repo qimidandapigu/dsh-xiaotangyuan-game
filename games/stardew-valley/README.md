@@ -1,21 +1,32 @@
-# XiaoTangYuan Game AI - Stardew Valley
+# 小汤圆游戏 AI：星露谷物语
 
-The Stardew Valley SMAPI adapter for `dsh-xiaotangyuan-game`.
+这是 `dsh-xiaotangyuan-game` 的轻量星露谷 SMAPI 适配器，源码位于 `adapter/`。
 
-## Install
+它只负责星露谷专属的状态、事件、动作和游戏内呈现。模型 Provider、Prompt、记忆、麦克风采集、语音识别、语音合成和音频播放都归 Harness 插件负责。
 
-After installing the Harness plugin, tell DeepSeek Harness:
+## 自动安装
+
+先安装 Harness 插件，然后在 DeepSeek Harness 中说：
 
 ```text
 小汤圆，帮我检测并安装星露谷 AI MOD
 ```
 
-For a manual installation, download the newest `stardew-v*` release from this repository and extract its `StardewAgentMod` folder into the game's `Mods` directory.
+插件会检测游戏和 SMAPI，再下载并验证最新的 `stardew-v*` Release 安装包。
 
-## Use
+## 手动安装
 
-Start Stardew Valley through SMAPI, load a save, and press `T`. Messages are sent over the loopback gateway to a game Agent running inside DeepSeek Harness.
+从本仓库最新的 `stardew-v*` Release 下载压缩包，将其中的 `StardewAgentMod` 文件夹解压到星露谷的 `Mods` 目录。
 
-## Compatibility
+## 使用
 
-The SMAPI `UniqueID` remains `qimidandapigu.StardewAgent`, and the installation folder remains `StardewAgentMod`, so version `0.2.0` upgrades version `0.1.0` in place.
+通过 SMAPI 启动星露谷并进入存档：
+
+- 按 `T` 输入文字。
+- 保持游戏在前台，按住 `V` 说话，松开后由 Harness 完成识别、看图、回复和语音播放。
+
+适配器每秒向 Harness 上报一次结构化游戏状态，并在游戏内显示非阻塞对话气泡。麦克风和扬声器不由 MOD 直接访问。
+
+## 兼容性
+
+SMAPI `UniqueID` 继续使用 `qimidandapigu.StardewAgent`，安装目录继续使用 `StardewAgentMod`，因此 `0.3.0` 可以原地升级旧版本，不会生成重复 MOD。
