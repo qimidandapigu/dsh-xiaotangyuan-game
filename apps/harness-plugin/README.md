@@ -18,10 +18,12 @@
 ## 安装
 
 ```powershell
-dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.4.2/qimidandapigu-dsh-xiaotangyuan-game-0.4.2.tgz"
+dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.5.0/qimidandapigu-dsh-xiaotangyuan-game-0.5.0.tgz"
 ```
 
 重启 Harness 后即可通过对话让小汤圆检测并安装各游戏的适配器。星露谷物语的请求示例：`小汤圆，帮我检测并安装星露谷物语的 AI MOD`。
+
+星露谷安装器会把第一方适配器与外观内容包和第三方运行组件分开处理。Content Patcher 与 TrinketTinker 始终从各自官方来源下载，经过版本、大小和 SHA-256 校验后再安装；它们不会被重新打包进小汤圆 Release。
 
 Gateway 只允许绑定本机回环地址，默认地址为 `ws://127.0.0.1:32145`。
 

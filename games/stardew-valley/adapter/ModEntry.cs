@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
@@ -13,7 +12,7 @@ namespace StardewAgentMod;
 public sealed class ModEntry : Mod
 {
     private readonly ConcurrentQueue<Action> mainThreadActions = new();
-    private CompanionAvatar companion = null!;
+    private CompanionLocator companion = null!;
     private SpeechBubble speechBubble = null!;
     private ModConfig config = null!;
     private GameAgentClient client = null!;
@@ -24,9 +23,8 @@ public sealed class ModEntry : Mod
     public override void Entry(IModHelper helper)
     {
         this.config = helper.ReadConfig<ModConfig>();
-        Texture2D companionTexture = helper.ModContent.Load<Texture2D>("assets/xiaotangyuan_companion.png");
-        this.companion = new CompanionAvatar(companionTexture);
-        this.speechBubble = new SpeechBubble(() => this.companion.WorldPosition);
+        this.companion = new CompanionLocator(helper, this.Monitor);
+        this.speechBubble = new SpeechBubble(this.companion.TryGetWorldPosition);
         this.client = new GameAgentClient(this.config.GatewayUrl);
         this.client.AssistantPresented += text => this.mainThreadActions.Enqueue(() => this.speechBubble.Show(text));
         this.client.AssistantStatusChanged += (status, transcript) => this.mainThreadActions.Enqueue(() =>
@@ -58,6 +56,8 @@ public sealed class ModEntry : Mod
         helper.Events.Input.ButtonPressed += this.OnButtonPressed;
         helper.Events.GameLoop.UpdateTicked += this.OnUpdateTicked;
         helper.Events.GameLoop.OneSecondUpdateTicked += this.OnOneSecondUpdateTicked;
+        helper.Events.GameLoop.SaveLoaded += this.OnSaveLoaded;
+        helper.Events.GameLoop.DayStarted += this.OnDayStarted;
         helper.Events.Display.RenderedWorld += this.OnRenderedWorld;
         helper.Events.GameLoop.ReturnedToTitle += this.OnReturnedToTitle;
 
@@ -143,14 +143,22 @@ public sealed class ModEntry : Mod
     private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
     {
         while (this.mainThreadActions.TryDequeue(out Action? action)) action();
-        if (this.config.ShowCompanion) this.companion.Update();
     }
 
     private void OnRenderedWorld(object? sender, RenderedWorldEventArgs e)
     {
         if (!Context.IsWorldReady) return;
-        if (this.config.ShowCompanion) this.companion.Draw(e.SpriteBatch, this.config.CompanionScale);
         this.speechBubble.Draw(e.SpriteBatch, this.config.BubbleYOffset);
+    }
+
+    private void OnSaveLoaded(object? sender, SaveLoadedEventArgs e)
+    {
+        this.companion.ApplyEnabled(this.config.ShowCompanion);
+    }
+
+    private void OnDayStarted(object? sender, DayStartedEventArgs e)
+    {
+        this.companion.ApplyEnabled(this.config.ShowCompanion);
     }
 
     private void OnReturnedToTitle(object? sender, ReturnedToTitleEventArgs e)
@@ -159,6 +167,5 @@ public sealed class ModEntry : Mod
         this.observationInFlight = false;
         this.latestObservation = null;
         this.speechBubble.Clear();
-        this.companion.Reset();
     }
 }

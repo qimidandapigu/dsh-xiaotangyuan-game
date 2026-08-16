@@ -12,6 +12,9 @@ const detectionSchema = {
     modsPath: { type: 'string' },
     smapiInstalled: { type: 'boolean', required: true },
     installedVersion: { type: 'string' },
+    contentPatcherVersion: { type: 'string' },
+    trinketTinkerVersion: { type: 'string' },
+    companionPackVersion: { type: 'string' },
   },
 } as const
 
@@ -30,7 +33,7 @@ export function registerGameTools(ctx: Context): void {
       render: (_args, value) => [{
         type: 'text',
         text: value.found
-          ? `Found Stardew Valley at ${value.gamePath}. SMAPI: ${value.smapiInstalled ? 'installed' : 'missing'}. Agent MOD: ${value.installedVersion ?? 'not installed'}.`
+          ? `Found Stardew Valley at ${value.gamePath}. SMAPI: ${value.smapiInstalled ? 'installed' : 'missing'}. Agent MOD: ${value.installedVersion ?? 'not installed'}. Content Patcher: ${value.contentPatcherVersion ?? 'missing'}. TrinketTinker: ${value.trinketTinkerVersion ?? 'missing'}. Companion pack: ${value.companionPackVersion ?? 'missing'}.`
           : 'Stardew Valley was not found automatically.',
       }],
     },
@@ -39,7 +42,7 @@ export function registerGameTools(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'game_mod_install',
-    description: 'Download, verify, back up, and install or update the Stardew Agent Mod. Call only after the user explicitly asks to install or update it. SMAPI must already be installed.',
+    description: 'Download, verify, back up, and install or update the Stardew Agent Mod, its XiaoTangYuan companion pack, and required official framework components. Call only after the user explicitly asks to install or update it. SMAPI must already be installed.',
     parameters: {
       confirmed: {
         type: 'boolean',
@@ -61,11 +64,12 @@ export function registerGameTools(ctx: Context): void {
           gamePath: { type: 'string', required: true },
           modPath: { type: 'string', required: true },
           backupPath: { type: 'string' },
+          components: { type: 'string', required: true },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: `Installed Stardew Agent Mod ${value.version} at ${value.modPath}.${value.backupPath === undefined ? '' : ` Previous version backed up to ${value.backupPath}.`} Restart Stardew Valley through SMAPI to load it.`,
+        text: `Installed Stardew Agent Mod ${value.version} at ${value.modPath}. Components: ${value.components}.${value.backupPath === undefined ? '' : ` Previous version backed up to ${value.backupPath}.`} Restart Stardew Valley through SMAPI to load it.`,
       }],
     },
     async execute(args, exec) {

@@ -33,7 +33,8 @@ protocol/
   v1/                        与语言无关的适配器协议
 games/
   stardew-valley/
-    adapter/                 轻量 SMAPI 桥接
+    adapter/                 轻量 SMAPI AI 桥接
+    content-pack/            小汤圆外观与组件配置
 docs/                        架构和职责说明
 ```
 
@@ -44,7 +45,7 @@ docs/                        架构和职责说明
 首次将小汤圆插件安装到 DeepSeek Harness：
 
 ```powershell
-dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.4.2/qimidandapigu-dsh-xiaotangyuan-game-0.4.2.tgz"
+dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/plugin-v0.5.0/qimidandapigu-dsh-xiaotangyuan-game-0.5.0.tgz"
 ```
 
 重启 Harness、刷新页面并新建对话，然后说：
@@ -53,7 +54,7 @@ dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-
 小汤圆，帮我检测并安装星露谷物语的 AI MOD
 ```
 
-插件会调用 `game_mod_detect` 和 `game_mod_install`，检测 Steam、星露谷与 SMAPI，下载最新的 `stardew-v*` 安装包，校验 SHA-256，备份旧版本并安装到游戏的 `Mods/StardewAgentMod` 目录。游戏适配器没有内置在插件包里，而是由插件在收到安装请求后从同一仓库的独立 Release 下载。宠物素材随游戏适配器一起安装，不需要额外安装 Content Patcher 或第三方宠物 MOD。
+插件会调用 `game_mod_detect` 和 `game_mod_install`，检测 Steam、星露谷与 SMAPI，并完成整套安装。第一方 Release 只包含轻量 AI 适配器和小汤圆内容包；安装器另外从官方来源下载并校验 Content Patcher 与 TrinketTinker，旧版本会先备份。用户不需要手动寻找这些依赖，仓库也不复制第三方二进制文件。
 
 如果已经安装过旧的 `@qimidandapigu/dsh-game-agent`，请先移除它，避免两个 Gateway 同时占用 `32145` 端口。
 
@@ -70,7 +71,7 @@ pnpm pack:plugin
 
 ## 当前状态
 
-Harness 插件 `0.4.2` 已实现 Gateway、结构化星露谷状态、多模态模型自动选择、DSH 凭据驱动的语音 Provider、稳定发布清单、升级时保留游戏配置，以及随插件分发的 Windows 麦克风与音频播放 Host。星露谷适配器 `0.4.0` 内置小汤圆宠物形象和录音/思考气泡反馈。日记、主动对话、关系任务和完整游戏动作仍在后续迁移范围内。
+Harness 插件 `0.5.0` 已实现 Gateway、结构化星露谷状态、多模态模型自动选择、DSH 凭据驱动的语音 Provider、稳定发布清单、升级时保留游戏配置，以及随插件分发的 Windows 麦克风与音频播放 Host。星露谷适配器 `0.5.0` 把宠物移动与渲染交给成熟组件，只同步 AI 的录音、思考和回复状态。日记、主动对话、关系任务和完整游戏动作仍在后续迁移范围内。
 
 ## 许可证
 
