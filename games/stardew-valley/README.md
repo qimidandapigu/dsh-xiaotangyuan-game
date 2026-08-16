@@ -1,42 +1,79 @@
 # 小汤圆游戏 AI：星露谷物语
 
-这是 `dsh-xiaotangyuan-game` 的星露谷集成。`adapter/` 是轻量 SMAPI AI 桥接，`content-pack/` 只保存小汤圆外观和组件配置。
+星露谷集成由一个轻量 SMAPI 适配器和一个外观内容包组成。当前第一方版本为 `0.5.0`。
 
-它只负责星露谷专属的状态、事件、动作和游戏内呈现。模型 Provider、Prompt、记忆、麦克风采集、语音识别、语音合成和音频播放都归 Harness 插件负责。
+## 组件
+
+| 组件 | 是否第一方 | 职责 |
+|---|---|---|
+| `StardewAgentMod` | 是 | 状态采集、T 文字输入、Gateway、游戏内气泡 |
+| `XiaoTangYuanCompanion` | 是 | 小汤圆图像与 TrinketTinker 配置 |
+| Content Patcher | 否 | 内容资源和数据加载 |
+| TrinketTinker | 否 | 宠物跟随、动画和渲染 |
+
+模型、Prompt、记忆、视觉、麦克风、ASR、TTS 和音频播放都由 Harness 插件负责。游戏适配器不保存任何 Provider Key。
 
 ## 自动安装
 
-先安装 Harness 插件，然后在 DeepSeek Harness 中说：
+先安装 Harness 插件 `0.5.1`，然后对小汤圆说：
 
 ```text
-小汤圆，帮我检测并安装星露谷 AI MOD
+小汤圆，帮我检测并安装星露谷物语的 AI MOD
 ```
 
-插件会检测游戏和 SMAPI，再完成以下安装：
+安装器会从小汤圆 Release 安装两个第一方目录，并从 Content Patcher、TrinketTinker 官方来源下载第三方组件。每个下载都经过地址、版本、大小和 SHA-256 校验。
 
-- 从本仓库 `stardew-v*` Release 安装 `StardewAgentMod` 与 `XiaoTangYuanCompanion`。
-- 从官方来源安装或升级 Content Patcher 与 TrinketTinker。
-- 对所有下载校验固定的文件大小和 SHA-256，并在覆盖旧版本前备份。
-
-因此用户只要说一次“帮我安装”，无需手动安装依赖；第三方组件仍保持独立来源和许可证，不会复制进本仓库的安装包。
-
-## 手动安装
-
-建议使用 Harness 自动安装。手动安装时，需要：
-
-1. 安装 Content Patcher `2.9.0` 或更高版本。
-2. 安装 TrinketTinker `1.9.0` 或更高版本。
-3. 从本仓库最新的 `stardew-v*` Release 下载压缩包，把其中的 `StardewAgentMod` 和 `XiaoTangYuanCompanion` 解压到星露谷的 `Mods` 目录。
+安装完成后必须通过 SMAPI 启动或重启游戏。
 
 ## 使用
 
-通过 SMAPI 启动星露谷并进入存档：
+进入存档后：
 
-- 按 `T` 输入文字。
-- 保持游戏在前台，按住 `V` 说话，松开后由 Harness 完成识别、看图、回复和语音播放。录音、识别和思考状态会显示在小汤圆头顶。
+- 按 `T` 打开文字输入框。
+- 保持游戏在前台，按住 `V` 说话，松开后提交。
+- 录音、转写、思考和最终回复状态会通过 HUD 或小汤圆气泡显示。
 
-适配器每秒向 Harness 上报一次结构化游戏状态，并把 AI 状态气泡定位到小汤圆同伴。宠物跟随、动画和渲染由 TrinketTinker 负责；资源加载由 Content Patcher 负责。麦克风和扬声器不由 MOD 直接访问。
+注意：
+
+- `T` 是 `StardewAgentMod` 的游戏内按键，可在 `config.json` 中修改。
+- `V` 不是 SMAPI 按键；它由 Harness 的 Windows 媒体 Host 监听，可通过 `media.pushToTalkVirtualKey` 修改。
+- 麦克风和扬声器不由游戏 MOD 直接访问。
+
+## 游戏配置
+
+首次运行后配置文件位于：
+
+```text
+Mods\StardewAgentMod\config.json
+```
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `GatewayUrl` | `ws://127.0.0.1:32145` | Harness Gateway |
+| `TextChatKey` | `T` | 游戏内文字对话键 |
+| `BubbleYOffset` | `220` | 气泡相对位置 |
+| `ShowCompanion` | `true` | 是否装备隐藏小汤圆同伴 |
+
+升级会保留这个配置文件。
 
 ## 兼容性
 
-要求 Stardew Valley `1.6.15`、SMAPI `4.4.0` 或更高版本。SMAPI `UniqueID` 继续使用 `qimidandapigu.StardewAgent`，安装目录继续使用 `StardewAgentMod`，因此可以原地升级旧版本，不会生成重复 MOD。
+- Stardew Valley `1.6.15` 或更高。
+- SMAPI `4.4.0` 或更高。
+- Content Patcher `2.9.0` 或更高。
+- TrinketTinker `1.9.0` 或更高。
+
+适配器 `UniqueID` 为 `qimidandapigu.StardewAgent`，安装目录为 `StardewAgentMod`。外观包 `UniqueID` 为 `qimidandapigu.XiaoTangYuanCompanion`。
+
+备份必须位于游戏根目录 `.xiaotangyuan-backups`。不要把完整旧 MOD 目录复制回 `Mods`，否则 SMAPI 会把它识别为重复副本并跳过所有同 ID 版本。
+
+## 手动安装
+
+推荐使用 Harness 自动安装。手动安装时：
+
+1. 从官方来源安装 Content Patcher 与 TrinketTinker。
+2. 从最新 `stardew-v*` Release 解压 `StardewAgentMod` 与 `XiaoTangYuanCompanion` 到 `Mods`。
+3. 确认四个组件只有一份。
+4. 通过 SMAPI 重启游戏。
+
+出现 T/V 无反应、重复 MOD 或宠物不显示时，参见[排错指南](../../docs/TROUBLESHOOTING.md)。
