@@ -2,7 +2,7 @@ from pathlib import Path
 from unittest.mock import patch
 import unittest
 
-from dont_starve_ai_mod.config import _env, _env_bool, parse_steam_library_paths
+from dont_starve_ai_mod.config import Settings, _env, parse_steam_library_paths
 
 
 class SteamLibraryParsingTests(unittest.TestCase):
@@ -21,9 +21,19 @@ class SteamLibraryParsingTests(unittest.TestCase):
         with patch.dict("os.environ", {"CHAT_URL": ""}):
             self.assertEqual(_env("CHAT_URL", "https://example.test/chat"), "https://example.test/chat")
 
-    def test_boolean_environment_value(self) -> None:
-        with patch.dict("os.environ", {"VISION_THINKING": "false"}):
-            self.assertFalse(_env_bool("VISION_THINKING", True))
+    def test_rejects_non_loopback_harness_gateway(self) -> None:
+        settings = Settings(
+            gateway_url="ws://example.com:32145",
+            connection_timeout_seconds=3,
+            request_timeout_seconds=120,
+            game_dir=None,
+            state_file=None,
+            reply_file=Path("reply.json"),
+            request_file=Path("requests.json"),
+            bridge_status_file=None,
+            runtime_dir=Path("runtime"),
+        )
+        self.assertIn("本机", settings.configuration_errors()[0])
 
 
 if __name__ == "__main__":

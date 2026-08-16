@@ -1,5 +1,7 @@
 # Don't Starve mod build artifacts
 *.zip
+!game-mod/anim/
+!game-mod/anim/jingling.zip
 dist/
 build/
 *.spec

@@ -1,6 +1,5 @@
 param(
-    [string]$OutputDirectory = 'dist',
-    [switch]$IncludeLocalEnv
+    [string]$OutputDirectory = 'dist'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,18 +31,16 @@ try {
         --distpath $outputPath `
         --paths src `
         --add-data 'game-mod;game-mod' `
-        --collect-all sounddevice `
         --hidden-import win32gui `
+        --hidden-import win32process `
         --hidden-import win32con `
+        --hidden-import websocket `
         scripts\launcher_entry.py
     if ($LASTEXITCODE -ne 0) {
         throw 'ChesterAI.exe build failed.'
     }
 
     Copy-Item -LiteralPath '.env.example' -Destination (Join-Path $outputPath '.env.example') -Force
-    if ($IncludeLocalEnv -and (Test-Path -LiteralPath '.env')) {
-        Copy-Item -LiteralPath '.env' -Destination (Join-Path $outputPath '.env') -Force
-    }
     Write-Host "Built launcher: $(Join-Path $outputPath 'ChesterAI.exe')"
 }
 finally {

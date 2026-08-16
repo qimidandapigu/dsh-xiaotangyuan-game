@@ -14,6 +14,18 @@ from dont_starve_ai_mod.mod_installer import (
 
 
 class ModInstallerTests(unittest.TestCase):
+    def test_missing_optional_animation_uses_safe_lua_fallback(self) -> None:
+        modmain = (Path(__file__).parents[1] / "game-mod" / "modmain.lua").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "local JINGLING_ANIM_AVAILABLE = GLOBAL.kleifileexists",
+            modmain,
+        )
+        self.assertIn("if JINGLING_ANIM_AVAILABLE then", modmain)
+        self.assertIn("if not JINGLING_ANIM_AVAILABLE", modmain)
+
     def test_enables_local_mod_only_once(self) -> None:
         first = enable_modsettings("-- settings\n")
         second = enable_modsettings(first)
@@ -34,7 +46,10 @@ class ModInstallerTests(unittest.TestCase):
             source.mkdir()
             source_exe = source / "ChesterAI.exe"
             source_exe.write_bytes(b"launcher")
-            (source / ".env").write_text("AI_API_KEY=test\n", encoding="utf-8")
+            (source / ".env.example").write_text(
+                "HARNESS_GATEWAY_URL=ws://127.0.0.1:32145\n",
+                encoding="utf-8",
+            )
             game_dir = root / "Don't Starve Together"
             settings = SimpleNamespace(game_dir=game_dir)
 
@@ -47,7 +62,10 @@ class ModInstallerTests(unittest.TestCase):
 
             self.assertEqual(destination, game_dir / "mods" / "dont-starve-ai-mod")
             self.assertEqual((destination / "ChesterAI.exe").read_bytes(), b"launcher")
-            self.assertEqual((destination / ".env").read_text(encoding="utf-8"), "AI_API_KEY=test\n")
+            self.assertEqual(
+                (destination / ".env.example").read_text(encoding="utf-8"),
+                "HARNESS_GATEWAY_URL=ws://127.0.0.1:32145\n",
+            )
             self.assertEqual(launch_option, f'"{destination / "ChesterAI.exe"}" %command%')
             self.assertEqual(
                 (destination / "Steam启动项.txt").read_text(encoding="utf-8"),

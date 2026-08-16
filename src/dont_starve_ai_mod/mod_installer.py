@@ -125,7 +125,7 @@ def install_player_launcher(settings: Settings) -> tuple[Path, str, list[str]]:
         shutil.copy2(source_exe, destination_exe)
         actions.append(f"已安装 {LAUNCHER_NAME}")
 
-    for filename in (".env", ".env.example"):
+    for filename in (".env.example",):
         source_file = source_dir / filename
         destination_file = destination / filename
         if source_file.is_file():

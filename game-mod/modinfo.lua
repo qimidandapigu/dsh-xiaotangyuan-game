@@ -1,7 +1,7 @@
 name = "Don't Starve AI Mod"
-description = "Press V to talk with Chester through the desktop AI sidecar."
+description = "Press V to talk with Chester through DeepSeek Harness."
 author = "Don't Starve AI Mod contributors"
-version = "0.2.16"
+version = "0.2.18"
 
 api_version = 10
 dst_compatible = true
@@ -148,7 +148,7 @@ configuration_options = {
     {
         name = "reminder_ai_enabled",
         label = "AI 润色游戏提醒",
-        hover = "开启后，游戏提醒会交给 Python AI 生成一句情境化回复；关闭时使用固定提醒文本。",
+        hover = "开启后，游戏提醒会交给 DeepSeek Harness 生成一句情境化回复；关闭时使用固定提醒文本。",
         options = {
             choice("关闭（默认）", false),
             choice("开启", true),

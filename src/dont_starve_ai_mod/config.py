@@ -5,12 +5,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-
-try:
-    from dotenv import load_dotenv
-except ImportError:  # Allows diagnostics to explain a partially installed environment.
-    def load_dotenv(*_args: object, **_kwargs: object) -> bool:
-        return False
+from urllib.parse import urlparse
 
 
 GAME_FOLDER = "Don't Starve Together"
@@ -27,9 +22,20 @@ def _env(name: str, default: str = "") -> str:
     return value.strip()
 
 
-def _env_bool(name: str, default: bool = False) -> bool:
-    value = _env(name, "true" if default else "false").lower()
-    return value in {"1", "true", "yes", "on", "enabled"}
+def _load_env_file(path: Path) -> None:
+    """Load the small, secret-free Adapter config without an extra dependency."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value.strip().strip('"').strip("'")
 
 
 def parse_steam_library_paths(text: str) -> list[Path]:
@@ -52,7 +58,6 @@ def _steam_roots() -> list[Path]:
             roots.append(Path(value))
     except (ImportError, OSError):
         pass
-
     roots.extend(
         Path(value)
         for value in (
@@ -63,11 +68,7 @@ def _steam_roots() -> list[Path]:
             r"F:\SteamLibrary",
         )
     )
-    unique: list[Path] = []
-    for path in roots:
-        if path not in unique:
-            unique.append(path)
-    return unique
+    return list(dict.fromkeys(roots))
 
 
 def discover_dst_game_dir() -> Path | None:
@@ -81,7 +82,6 @@ def discover_dst_game_dir() -> Path | None:
             continue
         for library in parse_steam_library_paths(library_text):
             candidates.append(library / "steamapps" / "common" / GAME_FOLDER)
-
     for candidate in candidates:
         if (candidate / "data" / "databundles" / "scripts.zip").is_file():
             return candidate.resolve()
@@ -90,24 +90,9 @@ def discover_dst_game_dir() -> Path | None:
 
 @dataclass(frozen=True)
 class Settings:
-    api_key: str
-    chat_url: str
-    transcription_url: str
-    tts_url: str
-    chat_model: str
-    transcription_model: str
-    tts_model: str
-    tts_voice: str
-    voice_provider: str
-    volcengine_api_key: str
-    volcengine_asr_resource_id: str
-    volcengine_tts_resource_id: str
-    voice_key: str
-    game_window_title: str
-    screenshot_max_width: int
-    vision_thinking: bool
+    gateway_url: str
+    connection_timeout_seconds: float
     request_timeout_seconds: float
-    reply_language: str
     game_dir: Path | None
     state_file: Path | None
     reply_file: Path | None
@@ -116,36 +101,16 @@ class Settings:
     runtime_dir: Path
 
     @property
-    def latest_screenshot(self) -> Path:
-        return self.runtime_dir / "latest_screenshot.png"
-
-    @property
-    def latest_context(self) -> Path:
-        return self.runtime_dir / "latest_context.json"
-
-    @property
-    def conversation_history_file(self) -> Path:
-        return self.runtime_dir / "conversation_history.json"
-
-    @property
     def log_file(self) -> Path:
-        return self.runtime_dir / "chester.log"
+        return self.runtime_dir / "chester-adapter.log"
 
-    def api_errors(self) -> list[str]:
-        errors: list[str] = []
-        if not self.api_key:
-            errors.append("缺少 AI_API_KEY")
-        if not self.chat_model:
-            errors.append("缺少 CHAT_MODEL")
-        if self.voice_provider == "volcengine":
-            if not self.volcengine_api_key:
-                errors.append("缺少 VOLCENGINE_API_KEY")
-        else:
-            if not self.transcription_model:
-                errors.append("缺少 TRANSCRIPTION_MODEL")
-            if not self.tts_model:
-                errors.append("缺少 TTS_MODEL")
-        return errors
+    def configuration_errors(self) -> list[str]:
+        parsed = urlparse(self.gateway_url)
+        if parsed.scheme != "ws" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+            return ["HARNESS_GATEWAY_URL 必须是本机 ws:// 地址"]
+        if self.request_file is None or self.reply_file is None:
+            return ["没有找到《饥荒联机版》目录，无法定位 Lua Bridge 文件"]
+        return []
 
 
 def load_settings(project_root: Path | None = None) -> Settings:
@@ -155,64 +120,32 @@ def load_settings(project_root: Path | None = None) -> Settings:
         root = Path(sys.executable).resolve().parent
     else:
         root = Path(__file__).resolve().parents[2]
-    load_dotenv(root / ".env")
+    _load_env_file(root / ".env")
 
-    base_url = _env("AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
     configured_game_dir = _env("DST_GAME_DIR")
-    game_dir = Path(configured_game_dir).expanduser().resolve() if configured_game_dir else discover_dst_game_dir()
-
+    game_dir = (
+        Path(configured_game_dir).expanduser().resolve()
+        if configured_game_dir
+        else discover_dst_game_dir()
+    )
     default_unsafedata = game_dir / "data" / "unsafedata" if game_dir else None
-    configured_state = _env("DST_STATE_FILE")
-    configured_reply = _env("DST_REPLY_FILE")
-    configured_request = _env("DST_REQUEST_FILE")
-    configured_bridge_status = _env("DST_BRIDGE_STATUS_FILE")
-    state_file = (
-        Path(configured_state).expanduser().resolve()
-        if configured_state
-        else (default_unsafedata / STATE_FILENAME if default_unsafedata else None)
-    )
-    reply_file = (
-        Path(configured_reply).expanduser().resolve()
-        if configured_reply
-        else (default_unsafedata / REPLY_FILENAME if default_unsafedata else None)
-    )
-    request_file = (
-        Path(configured_request).expanduser().resolve()
-        if configured_request
-        else (default_unsafedata / REQUEST_FILENAME if default_unsafedata else None)
-    )
-    bridge_status_file = (
-        Path(configured_bridge_status).expanduser().resolve()
-        if configured_bridge_status
-        else (default_unsafedata / BRIDGE_STATUS_FILENAME if default_unsafedata else None)
-    )
+
+    def bridge_path(variable: str, filename: str) -> Path | None:
+        configured = _env(variable)
+        if configured:
+            return Path(configured).expanduser().resolve()
+        return default_unsafedata / filename if default_unsafedata else None
 
     runtime_dir = root / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
-
     return Settings(
-        api_key=_env("AI_API_KEY"),
-        chat_url=_env("CHAT_URL", f"{base_url}/chat/completions"),
-        transcription_url=_env("TRANSCRIPTION_URL", f"{base_url}/audio/transcriptions"),
-        tts_url=_env("TTS_URL", f"{base_url}/audio/speech"),
-        chat_model=_env("CHAT_MODEL", "gpt-4o-mini"),
-        transcription_model=_env("TRANSCRIPTION_MODEL", "whisper-1"),
-        tts_model=_env("TTS_MODEL", "tts-1"),
-        tts_voice=_env("TTS_VOICE", "alloy"),
-        voice_provider=_env("VOICE_PROVIDER", "openai").lower(),
-        volcengine_api_key=_env("VOLCENGINE_API_KEY"),
-        volcengine_asr_resource_id=_env("VOLCENGINE_ASR_RESOURCE_ID", "volc.bigasr.auc"),
-        volcengine_tts_resource_id=_env("VOLCENGINE_TTS_RESOURCE_ID", "seed-tts-1.0"),
-        voice_key=_env("VOICE_KEY", "v").lower(),
-        game_window_title=_env("GAME_WINDOW_TITLE", GAME_FOLDER),
-        screenshot_max_width=max(320, int(_env("SCREENSHOT_MAX_WIDTH", "512"))),
-        vision_thinking=_env_bool("VISION_THINKING", False),
-        request_timeout_seconds=max(5.0, float(_env("REQUEST_TIMEOUT_SECONDS", "30"))),
-        reply_language=_env("REPLY_LANGUAGE", "Chinese"),
+        gateway_url=_env("HARNESS_GATEWAY_URL", "ws://127.0.0.1:32145"),
+        connection_timeout_seconds=max(1.0, float(_env("HARNESS_CONNECTION_TIMEOUT_SECONDS", "3"))),
+        request_timeout_seconds=max(5.0, float(_env("HARNESS_REQUEST_TIMEOUT_SECONDS", "120"))),
         game_dir=game_dir,
-        state_file=state_file,
-        reply_file=reply_file,
-        request_file=request_file,
-        bridge_status_file=bridge_status_file,
+        state_file=bridge_path("DST_STATE_FILE", STATE_FILENAME),
+        reply_file=bridge_path("DST_REPLY_FILE", REPLY_FILENAME),
+        request_file=bridge_path("DST_REQUEST_FILE", REQUEST_FILENAME),
+        bridge_status_file=bridge_path("DST_BRIDGE_STATUS_FILE", BRIDGE_STATUS_FILENAME),
         runtime_dir=runtime_dir,
     )

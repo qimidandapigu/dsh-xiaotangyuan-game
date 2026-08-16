@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import argparse
 import logging
+import socket
 import subprocess
 import sys
 import threading
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .app import ChesterApp
 from .config import Settings, load_settings
 from .game_state import read_game_state
 from .mod_installer import LAUNCH_OPTION_FILENAME, ensure_game_mod, install_player_launcher
-from .screen_capture import capture_game_window
 
 
 def _configure_logging(settings: Settings) -> None:
@@ -43,34 +44,27 @@ def _check(settings: Settings) -> int:
     lua_log = settings.request_file.parent / "dont_starve_ai_mod_lua.txt" if settings.request_file else None
     print(f"Lua 诊断日志：{lua_log or '未找到'}")
     print(f"Python 日志：{settings.log_file}")
-    print(f"API Key：{'已配置' if settings.api_key else '缺失'}")
-    print(f"聊天模型：{settings.chat_model}")
-    print(f"语音服务：{settings.voice_provider}")
-    print(f"说话按键：{settings.voice_key.upper()}")
-
+    print(f"Harness Gateway：{settings.gateway_url}")
     try:
-        import sounddevice as sd
-
-        default_input = sd.query_devices(kind="input")
-        print(f"麦克风：{default_input['name']}")
+        parsed = urlparse(settings.gateway_url)
+        with socket.create_connection(
+            (parsed.hostname or "127.0.0.1", parsed.port or 32145),
+            timeout=settings.connection_timeout_seconds,
+        ):
+            print("Harness：端口已就绪")
     except Exception as exc:
-        print(f"麦克风：不可用（{exc}）")
-
-    try:
-        capture = capture_game_window(settings.game_window_title, settings.screenshot_max_width)
-        size = capture.window["capture_size"]
-        print(f"游戏窗口：已找到（{size['width']}x{size['height']}）")
-    except Exception as exc:
-        print(f"游戏窗口：不可用（{exc}）")
-    return 0 if not settings.api_errors() else 1
+        print(f"Harness：未连接（{exc}）")
+    errors = settings.configuration_errors()
+    for error in errors:
+        print(f"配置错误：{error}")
+    return 0 if not errors else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="通过语音和游戏画面与切斯特对话")
+    parser = argparse.ArgumentParser(description="把《饥荒联机版》连接到 DeepSeek Harness")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--check", action="store_true", help="检查本地配置和设备")
-    group.add_argument("--capture-once", action="store_true", help="保存一次截图和游戏信息，不调用 API")
-    group.add_argument("--text", metavar="消息", help="输入文字进行测试，不录制语音")
+    group.add_argument("--text", metavar="消息", help="通过 Harness 发送一条文字测试消息")
     group.add_argument(
         "--install",
         action="store_true",
@@ -97,6 +91,32 @@ def _set_console_title() -> None:
         pass
 
 
+def _find_running_dst_process_id() -> int | None:
+    if sys.platform != "win32":
+        return None
+    try:
+        import win32gui
+        import win32process
+
+        found: list[int] = []
+
+        def inspect(window: int, _extra: object) -> bool:
+            if not win32gui.IsWindowVisible(window):
+                return True
+            title = win32gui.GetWindowText(window).lower()
+            if "don't starve together" not in title and "饥荒联机版" not in title:
+                return True
+            _, process_id = win32process.GetWindowThreadProcessId(window)
+            if process_id > 0:
+                found.append(process_id)
+            return True
+
+        win32gui.EnumWindows(inspect, None)
+        return found[0] if found else None
+    except Exception:
+        return None
+
+
 def _launch_game(app: ChesterApp, settings: Settings, command: list[str]) -> int:
     if not command:
         logging.getLogger("chester").error("Steam 没有传入原始游戏启动命令")
@@ -108,6 +128,7 @@ def _launch_game(app: ChesterApp, settings: Settings, command: list[str]) -> int
     executable = Path(command[0]).resolve()
     logging.getLogger("chester").info("正在启动《饥荒联机版》：%s", executable)
     game = subprocess.Popen(command, cwd=executable.parent)
+    app.start_gateway(game.pid)
     voice_thread = threading.Thread(
         target=app.run_mod_request_loop,
         daemon=True,
@@ -115,9 +136,12 @@ def _launch_game(app: ChesterApp, settings: Settings, command: list[str]) -> int
     )
     voice_thread.start()
     logging.getLogger("chester").info("游戏已启动。在游戏中按住 V 键即可和切斯特说话。")
-    exit_code = game.wait()
-    logging.getLogger("chester").info("游戏已退出（代码 %s），切斯特 AI 正在关闭。", exit_code)
-    return exit_code
+    try:
+        exit_code = game.wait()
+        logging.getLogger("chester").info("游戏已退出（代码 %s），DST Adapter 正在关闭。", exit_code)
+        return exit_code
+    finally:
+        app.close()
 
 
 def _show_message_box(message: str, *, error: bool = False) -> None:
@@ -275,37 +299,39 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(sys, "frozen", False) and not raw_args:
         return _install(settings, show_dialog=True)
 
-    app = ChesterApp(settings)
-    if args.capture_once:
-        try:
-            app.capture_context()
-        except Exception as exc:
-            logging.getLogger("chester").error("截图失败：%s", exc)
-            return 1
-        print(f"截图：{settings.latest_screenshot}")
-        print(f"游戏信息：{settings.latest_context}")
-        return 0
-
-    errors = settings.api_errors()
+    errors = settings.configuration_errors()
     if errors:
         for error in errors:
             logging.getLogger("chester").error(error)
-        logging.getLogger("chester").error("请把 .env.example 复制为 .env，并配置 AI 服务")
+        logging.getLogger("chester").error("请检查《饥荒联机版》目录与本机 Harness Gateway 配置")
         return 2
 
+    app = ChesterApp(settings)
     try:
         if args.launch or args.game_command:
             return _launch_game(app, settings, args.game_command)
         if args.text:
+            process_id = _find_running_dst_process_id()
+            if process_id is None:
+                logging.getLogger("chester").error("请先启动《饥荒联机版》，再运行文字测试")
+                return 2
+            app.start_gateway(process_id)
             reply = app.process_text(args.text)
             print(f"切斯特：{reply}")
         else:
+            process_id = _find_running_dst_process_id()
+            if process_id is None:
+                logging.getLogger("chester").error("没有找到正在运行的《饥荒联机版》进程")
+                return 2
+            app.start_gateway(process_id)
             app.run_mod_request_loop()
     except KeyboardInterrupt:
         print("\n已停止。")
     except Exception:
         logging.getLogger("chester").exception("发生严重错误")
         return 1
+    finally:
+        app.close()
     return 0
 
 

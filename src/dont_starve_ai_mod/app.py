@@ -7,18 +7,17 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
-import requests
-
-from .ai_client import AiClient
-from .audio import VoiceRecorder, play_wav, wav_duration_seconds
+from . import __version__
 from .config import Settings
-from .game_state import build_context, read_game_state, save_context
-from .screen_capture import capture_game_window, is_game_foreground
+from .harness_client import HarnessClient
 
 
 LOGGER = logging.getLogger("chester")
-HISTORY_LIMIT = 10
+ADAPTER_ID = "qimidandapigu.dont-starve-ai-mod"
+GAME_ID = "dont-starve-together"
+ADAPTER_VERSION = __version__
 
 
 def write_reply(
@@ -31,7 +30,7 @@ def write_reply(
         LOGGER.warning("回复文件路径不可用，已跳过游戏内气泡显示")
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+    payload: dict[str, object] = {
         "id": str(uuid.uuid4()),
         "text": text,
         "created_at_unix": time.time(),
@@ -45,215 +44,187 @@ def write_reply(
     os.replace(temporary, path)
 
 
+def build_chat_context(state: dict[str, object] | None) -> dict[str, object]:
+    context: dict[str, object] = {
+        "roleInstructions": (
+            "You are Chester, the player's warm and practical companion in Don't Starve Together. "
+            "Answer in concise natural Chinese unless the player uses another language. "
+            "Use the supplied game state as facts and never claim you performed a game action."
+        )
+    }
+    if state is None:
+        return context
+    context["observation"] = state
+    player = state.get("player")
+    if isinstance(player, dict):
+        name = player.get("name")
+        if isinstance(name, str) and name.strip():
+            context["playerName"] = name.strip()
+    world = state.get("world")
+    if isinstance(world, dict):
+        cycles = world.get("cycles")
+        season = world.get("season")
+        date_parts: list[str] = []
+        if isinstance(cycles, (int, float)):
+            date_parts.append(f"Day {int(cycles) + 1}")
+        if isinstance(season, str) and season:
+            date_parts.append(season)
+        if date_parts:
+            context["date"] = ", ".join(date_parts)
+        phase = world.get("phase")
+        if isinstance(phase, str) and phase:
+            context["time"] = phase
+    nearby = state.get("nearby")
+    if isinstance(nearby, list):
+        names = [
+            str(item.get("name") or item.get("prefab"))
+            for item in nearby[:5]
+            if isinstance(item, dict) and (item.get("name") or item.get("prefab"))
+        ]
+        if names:
+            context["nearbyNpc"] = ", ".join(names)
+    return context
+
+
 class ChesterApp:
-    def __init__(self, settings: Settings) -> None:
+    """Thin DST Adapter: Lua files in, Harness JSON-RPC out, replies back to Lua."""
+
+    def __init__(self, settings: Settings, gateway: HarnessClient | None = None) -> None:
         self.settings = settings
-        self.recorder = VoiceRecorder()
-        self.ai = AiClient(settings)
+        self._gateway = gateway or HarnessClient(
+            settings.gateway_url,
+            adapter_id=ADAPTER_ID,
+            game_id=GAME_ID,
+            version=ADAPTER_VERSION,
+            on_notification=self._on_harness_notification,
+            connect_timeout=settings.connection_timeout_seconds,
+        )
         self._busy = threading.Lock()
         self._seen_request_ids: set[str] = set()
         self._last_bridge_heartbeat = 0.0
         self._last_bridge_status_write = 0.0
         self._last_request_at_unix: float | None = None
         self._last_request_action: str | None = None
-        self._conversation_history_file = getattr(settings, "conversation_history_file", None)
-        self._conversation_history = self._load_conversation_history()
-        self._last_question = self._latest_question()
-        self._restore_ai_history()
+        self._last_error: str | None = None
+        self._recording = False
+        self._thinking = False
+        self._active_recipient_userid: str | None = None
+        self._last_present_monotonic = 0.0
 
-    def _load_conversation_history(self) -> list[dict[str, object]]:
-        path = self._conversation_history_file
-        if not isinstance(path, Path):
-            return []
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            return []
-        except (OSError, json.JSONDecodeError):
-            LOGGER.warning("Unable to read conversation history; starting empty", exc_info=True)
-            return []
-        turns = payload.get("turns") if isinstance(payload, dict) else None
-        if not isinstance(turns, list):
-            return []
-        return [
-            turn
-            for turn in turns[-HISTORY_LIMIT:]
-            if isinstance(turn, dict)
-            and isinstance(turn.get("user"), str)
-            and isinstance(turn.get("assistant"), str)
-        ]
+    def start_gateway(self, process_id: int) -> None:
+        self._gateway.start(process_id)
 
-    def _latest_question(self) -> str | None:
-        if not self._conversation_history:
-            return None
-        question = self._conversation_history[-1].get("user")
-        return question if isinstance(question, str) and question.strip() else None
+    def close(self) -> None:
+        self._gateway.close()
 
-    def _restore_ai_history(self) -> None:
-        history = getattr(self.ai, "history", None)
-        if history is None:
-            return
-        for turn in self._conversation_history[-6:]:
-            history.append(("user", turn["user"]))
-            history.append(("assistant", turn["assistant"]))
-
-    def _record_conversation_turn(self, question: str, reply: str) -> None:
-        self._last_question = question
-        self._conversation_history.append(
-            {"user": question, "assistant": reply, "created_at_unix": time.time()}
-        )
-        self._conversation_history = self._conversation_history[-HISTORY_LIMIT:]
-        path = self._conversation_history_file
-        if not isinstance(path, Path):
-            return
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {"schema_version": 1, "turns": self._conversation_history}
-            temporary = path.with_suffix(path.suffix + ".tmp")
-            temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-            os.replace(temporary, path)
-        except OSError:
-            LOGGER.warning("Unable to save conversation history", exc_info=True)
-
-    def capture_context(
-        self,
-        request_state: dict[str, object] | None = None,
-    ) -> tuple[bytes, dict[str, object]]:
-        capture = capture_game_window(
-            self.settings.game_window_title,
-            self.settings.screenshot_max_width,
-        )
-        game_state = (
-            {
-                "available": True,
-                "age_seconds": 0.0,
-                "stale": False,
-                "source": "mod_request",
-                "data": request_state,
-            }
-            if request_state is not None
-            else read_game_state(self.settings.state_file)
-        )
-        context = build_context(game_state, capture.window)
-        self.settings.latest_screenshot.write_bytes(capture.png)
-        save_context(self.settings.latest_context, context)
-        LOGGER.info(
-            "已截取 %sx%s 游戏画面；Lua 状态可用=%s",
-            capture.window["capture_size"]["width"],
-            capture.window["capture_size"]["height"],
-            game_state.get("available"),
-        )
-        return capture.png, context
-
-    def process_audio(
-        self,
-        wav: bytes,
-        request_state: dict[str, object] | None = None,
-        recipient_userid: str | None = None,
-    ) -> None:
-        if not wav:
-            message = "我没有听到声音，请按住 V 再说一次。"
-            LOGGER.warning(message)
-            write_reply(self.settings.reply_file, message, recipient_userid)
-            return
+    def process_text(self, text: str, state: dict[str, object] | None = None) -> str:
         with self._busy:
-            screenshot, context = self.capture_context(request_state)
-            LOGGER.info("正在识别 %.1f KiB 的麦克风录音", len(wav) / 1024)
-            text = self.ai.transcribe(wav)
-            if not text:
-                message = "我没有听清楚，请按住 V 再说一次。"
-                LOGGER.warning(message)
-                write_reply(self.settings.reply_file, message, recipient_userid)
-                return
-            self._answer(text, screenshot, context, recipient_userid)
+            result = self._gateway.call(
+                "chat.send",
+                {"text": text, "context": build_chat_context(state)},
+                self.settings.request_timeout_seconds,
+            )
+        if not isinstance(result, dict) or not isinstance(result.get("reply"), str):
+            raise RuntimeError("Harness 没有返回有效文字回复")
+        return result["reply"]
 
-    def process_text(self, text: str) -> str:
-        with self._busy:
-            screenshot, context = self.capture_context()
-            return self._answer(text, screenshot, context)
+    def _on_harness_notification(self, method: str, params: dict[str, Any]) -> None:
+        if method == "assistant.status":
+            status = params.get("status")
+            self._recording = status == "recording"
+            self._thinking = status == "thinking"
+            self._write_bridge_status(force=True)
+            return
+        if method == "assistant.present":
+            text = params.get("text")
+            if isinstance(text, str) and text.strip():
+                self._recording = False
+                self._thinking = False
+                self._last_present_monotonic = time.monotonic()
+                write_reply(
+                    self.settings.reply_file,
+                    text.strip(),
+                    self._active_recipient_userid,
+                    30.0,
+                )
+                LOGGER.info("Harness 回复：%s", text.strip())
+            return
+        if method == "assistant.error":
+            message = str(params.get("message") or "Harness 语音处理失败")
+            self._last_error = message
+            self._recording = False
+            self._thinking = False
+            LOGGER.error("Harness：%s", message)
+            if time.monotonic() - self._last_present_monotonic > 2.0:
+                write_reply(
+                    self.settings.reply_file,
+                    "我刚才没听清或没能回答，请按住 V 再试一次。",
+                    self._active_recipient_userid,
+                )
+            self._write_bridge_status(force=True)
 
-    def _answer(
+    def _publish_state(self, state: dict[str, object] | None) -> None:
+        if state is not None:
+            self._gateway.notify("state.update", {"observation": state})
+
+    def _retry_last(
         self,
-        text: str,
-        screenshot: bytes,
-        context: dict[str, object],
-        recipient_userid: str | None = None,
-    ) -> str:
-        LOGGER.info("玩家：%s", text)
-        LOGGER.info(
-            "正在等待 AI 回答（思考模式=%s，最长等待 %.0f 秒）……",
-            "开启" if self.settings.vision_thinking else "关闭",
-            self.settings.request_timeout_seconds,
-        )
-        reply = self.ai.chat(text, screenshot, context)
-        self._record_conversation_turn(text, reply)
-        LOGGER.info("切斯特：%s", reply)
-        wav = self.ai.synthesize(reply)
-        # Do not start the in-game text timer while TTS is still being
-        # generated.  The game polls the reply file, so reserve a small lead
-        # time before playback as well as the actual WAV duration.
-        # Leave the reply visible long enough to read after the voice finishes.
-        display_duration = max(12.0, min(60.0, wav_duration_seconds(wav) + 4.0))
-        write_reply(
-            self.settings.reply_file,
-            reply,
-            recipient_userid,
-            display_duration,
-        )
-        time.sleep(0.6)
-        play_wav(wav)
-        return reply
-
-    def retry_last_question(
-        self,
-        request_state: dict[str, object] | None = None,
-        recipient_userid: str | None = None,
+        state: dict[str, object] | None,
+        recipient_userid: str | None,
     ) -> None:
-        question = self._last_question
-        if not question:
+        try:
+            with self._busy:
+                self._active_recipient_userid = recipient_userid
+                self._gateway.call(
+                    "chat.retry",
+                    {"context": build_chat_context(state)},
+                    self.settings.request_timeout_seconds,
+                )
+        except Exception:
+            LOGGER.exception("Harness 重试上一条回复失败")
             write_reply(
                 self.settings.reply_file,
-                "我还没有听到上一句话，先按住 V 和我说话吧。",
+                "我没能重新回答上一句话，请稍后按 Shift+V 再试一次。",
                 recipient_userid,
             )
-            return
-        with self._busy:
-            screenshot, context = self.capture_context(request_state)
-            LOGGER.info("正在重试上一条问题：%s", question)
-            self._answer(question, screenshot, context, recipient_userid)
 
-    def process_game_reminder(
+    def _compose_reminder(
         self,
         kind: str,
         fallback_message: str,
-        request_state: dict[str, object] | None = None,
-        recipient_userid: str | None = None,
+        state: dict[str, object] | None,
+        recipient_userid: str | None,
     ) -> None:
-        """Ask AI for a short situational reminder without altering chat history."""
-        with self._busy:
-            screenshot, context = self.capture_context(request_state)
+        try:
             prompt = (
                 "这是一条游戏内自动提醒，不是玩家提问。"
                 f"提醒类型：{kind}。基础提醒：{fallback_message}\n"
-                "请以切斯特的口吻改写成一句自然、实用的中文提醒，不超过 30 个汉字。"
+                "请以切斯特的口吻改写成一句自然、实用的中文提醒，不超过30个汉字。"
                 "不要使用角色前缀、Markdown、解释或反问。"
             )
-            reply = self.ai.chat(
-                prompt,
-                screenshot,
-                context,
-                include_history=False,
-                remember=False,
+            with self._busy:
+                result = self._gateway.call(
+                    "assistant.compose",
+                    {"text": prompt, "context": build_chat_context(state)},
+                    self.settings.request_timeout_seconds,
+                )
+            reply = result.get("reply") if isinstance(result, dict) else None
+            write_reply(
+                self.settings.reply_file,
+                reply.strip() if isinstance(reply, str) and reply.strip() else fallback_message,
+                recipient_userid,
             )
-            write_reply(self.settings.reply_file, reply or fallback_message, recipient_userid)
+        except Exception:
+            LOGGER.exception("Harness 游戏提醒生成失败，使用固定提醒：%s", kind)
+            write_reply(self.settings.reply_file, fallback_message, recipient_userid)
 
     def run_mod_request_loop(self, poll_interval: float = 0.05) -> None:
         path = self.settings.request_file
         if path is None:
             raise RuntimeError("无法确定 Mod 请求文件路径")
         path.parent.mkdir(parents=True, exist_ok=True)
-        LOGGER.info("Mod 桥接启动：request_file=%s", path)
-        LOGGER.info("状态文件=%s；回复文件=%s", self.settings.state_file, self.settings.reply_file)
+        LOGGER.info("DST Adapter 启动：request_file=%s", path)
+        LOGGER.info("Gateway=%s；回复文件=%s", self.settings.gateway_url, self.settings.reply_file)
         self._ignore_existing_mod_requests(path)
         while True:
             self._write_bridge_status()
@@ -263,41 +234,34 @@ class ChesterApp:
                 action = request.get("action")
                 self._last_request_action = action if isinstance(action, str) else None
                 self._write_bridge_status(force=True)
-                LOGGER.info(
-                    "收到 Mod 事件：action=%s id=%s state=%s",
-                    request.get("action"),
-                    request.get("id"),
-                    "有" if isinstance(request.get("state"), dict) else "无",
-                )
                 self._handle_mod_request(request)
             time.sleep(poll_interval)
 
     def _write_bridge_status(self, force: bool = False) -> None:
-        """Publish lightweight, secret-free bridge health for the in-game HUD."""
-        path = getattr(self.settings, "bridge_status_file", None)
-        if not isinstance(path, Path):
+        path = self.settings.bridge_status_file
+        if path is None:
             return
         now_monotonic = time.monotonic()
         if not force and now_monotonic - self._last_bridge_status_write < 1.0:
             return
         self._last_bridge_status_write = now_monotonic
-
         last_reply_at_unix: float | None = None
-        reply_file = getattr(self.settings, "reply_file", None)
-        if isinstance(reply_file, Path):
+        if self.settings.reply_file is not None:
             try:
-                last_reply_at_unix = reply_file.stat().st_mtime
+                last_reply_at_unix = self.settings.reply_file.stat().st_mtime
             except OSError:
                 pass
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "heartbeat_at_unix": time.time(),
             "last_request_at_unix": self._last_request_at_unix,
             "last_request_action": self._last_request_action,
             "last_reply_at_unix": last_reply_at_unix,
-            "chat_model": getattr(self.settings, "chat_model", "") or "unknown",
-            "busy": self._busy.locked(),
-            "recording": self.recorder.is_recording,
+            "chat_model": "DeepSeek Harness",
+            "gateway_connected": self._gateway.connected,
+            "busy": self._busy.locked() or self._thinking,
+            "recording": self._recording,
+            "last_error": self._last_error,
         }
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -305,7 +269,7 @@ class ChesterApp:
             temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
             os.replace(temporary, path)
         except OSError:
-            LOGGER.warning("Unable to write bridge status", exc_info=True)
+            LOGGER.warning("无法写入 Adapter 状态", exc_info=True)
 
     def _log_bridge_heartbeat(self, path: Path) -> None:
         now = time.monotonic()
@@ -317,10 +281,10 @@ class ChesterApp:
         except OSError as exc:
             size = f"不可用（{exc}）"
         LOGGER.info(
-            "Mod 桥接心跳：size=%s seen_events=%s recording=%s busy=%s",
+            "DST Adapter 心跳：size=%s seen_events=%s harness=%s busy=%s",
             size,
             len(self._seen_request_ids),
-            self.recorder.is_recording,
+            "已连接" if self._gateway.connected else "未连接",
             self._busy.locked(),
         )
 
@@ -329,8 +293,6 @@ class ChesterApp:
         self._seen_request_ids.update(self._request_id(event) for event in existing)
         if existing:
             LOGGER.info("忽略启动前已有的 Mod 请求：%s 个事件", len(existing))
-        else:
-            LOGGER.info("请求文件尚未生成或没有事件，等待 Mod 首次按键事件")
 
     @staticmethod
     def _request_id(request: dict[str, object]) -> str:
@@ -354,19 +316,15 @@ class ChesterApp:
             return []
         if not raw.strip():
             return []
-
         try:
             document = json.loads(raw)
         except json.JSONDecodeError:
-            LOGGER.warning("Mod 请求 JSON 暂未写完整，将在下一轮重试")
             return []
-
         if isinstance(document, dict) and isinstance(document.get("events"), list):
             values = document["events"]
         elif isinstance(document, dict) and isinstance(document.get("action"), str):
             values = [document]
         else:
-            LOGGER.warning("Mod 请求 JSON 结构无效：需要 events 数组")
             return []
         return [value for value in values if isinstance(value, dict)]
 
@@ -378,188 +336,47 @@ class ChesterApp:
                 continue
             self._seen_request_ids.add(request_id)
             found.append(request)
-        if found:
-            LOGGER.info("从 Mod 请求 JSON 读取到 %s 个新事件", len(found))
         return found
 
     def _handle_mod_request(self, request: dict[str, object]) -> None:
         action = request.get("action")
-        LOGGER.info(
-            "处理 Mod 事件：action=%s recording=%s busy=%s",
-            action,
-            self.recorder.is_recording,
-            self._busy.locked(),
-        )
+        state = request.get("state")
+        request_state = state if isinstance(state, dict) else None
+        recipient = self._recipient_userid(request)
         if action == "start_recording":
-            if self._busy.locked() or self.recorder.is_recording:
-                LOGGER.warning("忽略开始录音事件：录音或上一轮处理仍在进行")
-                return
-            try:
-                self.recorder.start()
-                LOGGER.info("录音已开始")
-            except Exception:
-                LOGGER.exception("录音启动失败")
+            self._active_recipient_userid = recipient
+            self._recording = True
+            self._publish_state(request_state)
             return
-
+        if action == "stop_recording":
+            self._active_recipient_userid = recipient
+            self._recording = False
+            self._publish_state(request_state)
+            return
+        if action == "retry_last":
+            if self._busy.locked():
+                write_reply(self.settings.reply_file, "我还在处理上一句话，请稍等一下。", recipient)
+                return
+            threading.Thread(
+                target=self._retry_last,
+                args=(request_state, recipient),
+                daemon=True,
+                name="chester-harness-retry",
+            ).start()
+            return
         if action == "game_reminder":
             reminder = request.get("reminder")
             kind = reminder.get("kind") if isinstance(reminder, dict) else None
             message = reminder.get("message") if isinstance(reminder, dict) else None
             if not isinstance(kind, str) or not isinstance(message, str) or not message:
-                LOGGER.warning("Ignoring malformed game reminder event")
                 return
-            if self._busy.locked() or self.recorder.is_recording:
-                LOGGER.info("Skipping AI game reminder while voice processing is active: %s", kind)
+            if self._busy.locked() or self._recording:
                 return
-            state = request.get("state")
             threading.Thread(
-                target=self._safe_process_game_reminder,
-                args=(
-                    kind,
-                    message,
-                    state if isinstance(state, dict) else None,
-                    self._recipient_userid(request),
-                ),
+                target=self._compose_reminder,
+                args=(kind, message, request_state, recipient),
                 daemon=True,
-                name="chester-game-reminder",
+                name="chester-harness-reminder",
             ).start()
             return
-
-        if action == "retry_last":
-            recipient_userid = self._recipient_userid(request)
-            if self._busy.locked() or self.recorder.is_recording:
-                write_reply(
-                    self.settings.reply_file,
-                    "我还在处理上一句话，请稍等一下。",
-                    recipient_userid,
-                )
-                return
-            state = request.get("state")
-            threading.Thread(
-                target=self._safe_retry_last_question,
-                args=(state if isinstance(state, dict) else None, recipient_userid),
-                daemon=True,
-                name="chester-retry",
-            ).start()
-            return
-
-        if action != "stop_recording":
-            LOGGER.warning("忽略未知 Mod 事件：%s", action)
-            write_reply(
-                self.settings.reply_file,
-                "我没有认出这个指令，请重启切斯特 AI 后再试一次。",
-                self._recipient_userid(request),
-            )
-            return
-        if not self.recorder.is_recording:
-            LOGGER.warning("忽略停止录音事件：录音机当前没有录音")
-            return
-        try:
-            wav = self.recorder.stop()
-            state = request.get("state")
-            LOGGER.info("录音已停止：wav_bytes=%s state=%s", len(wav), isinstance(state, dict))
-            threading.Thread(
-                target=self._safe_process_audio,
-                args=(
-                    wav,
-                    state if isinstance(state, dict) else None,
-                    self._recipient_userid(request),
-                ),
-                daemon=True,
-                name="chester-turn",
-            ).start()
-        except Exception:
-            LOGGER.exception("录音停止失败")
-
-    def run_hotkey_loop(self) -> None:
-        try:
-            from pynput import keyboard
-        except ImportError as exc:
-            raise RuntimeError("缺少按键监听组件 pynput") from exc
-
-        key_name = self.settings.voice_key
-        LOGGER.info("准备就绪。在游戏中按住 %s 键和切斯特说话；按 Ctrl+C 退出。", key_name.upper())
-
-        def is_voice_key(key: object) -> bool:
-            return getattr(key, "char", "") is not None and getattr(key, "char", "").lower() == key_name
-
-        def on_press(key: object) -> None:
-            if (
-                not is_voice_key(key)
-                or self.recorder.is_recording
-                or self._busy.locked()
-                or not is_game_foreground(self.settings.game_window_title)
-            ):
-                return
-            try:
-                self.recorder.start()
-                LOGGER.info("正在听……")
-            except Exception:
-                LOGGER.exception("无法开始录音")
-
-        def on_release(key: object) -> None:
-            if not is_voice_key(key) or not self.recorder.is_recording:
-                return
-            try:
-                wav = self.recorder.stop()
-                LOGGER.info("说话键已松开，正在处理……")
-                threading.Thread(
-                    target=self._safe_process_audio,
-                    args=(wav,),
-                    daemon=True,
-                    name="chester-turn",
-                ).start()
-            except Exception:
-                LOGGER.exception("无法停止录音")
-
-        with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-            listener.join()
-
-    def _safe_process_audio(
-        self,
-        wav: bytes,
-        request_state: dict[str, object] | None = None,
-        recipient_userid: str | None = None,
-    ) -> None:
-        try:
-            self.process_audio(wav, request_state, recipient_userid)
-        except requests.Timeout:
-            message = "AI 接口响应超时了，请再按 V 重试一次。"
-            LOGGER.error("%s 当前对话已经结束，程序没有死机。", message)
-            write_reply(self.settings.reply_file, message, recipient_userid)
-        except Exception:
-            message = "我刚才走神了，请按住 V 再问一次。"
-            LOGGER.exception("本次切斯特对话处理失败")
-            write_reply(self.settings.reply_file, message, recipient_userid)
-
-    def _safe_process_game_reminder(
-        self,
-        kind: str,
-        fallback_message: str,
-        request_state: dict[str, object] | None = None,
-        recipient_userid: str | None = None,
-    ) -> None:
-        try:
-            self.process_game_reminder(kind, fallback_message, request_state, recipient_userid)
-        except requests.Timeout:
-            LOGGER.warning("AI game reminder timed out; using fixed text: %s", kind)
-            write_reply(self.settings.reply_file, fallback_message, recipient_userid)
-        except Exception:
-            LOGGER.exception("AI game reminder failed; using fixed text: %s", kind)
-            write_reply(self.settings.reply_file, fallback_message, recipient_userid)
-
-    def _safe_retry_last_question(
-        self,
-        request_state: dict[str, object] | None = None,
-        recipient_userid: str | None = None,
-    ) -> None:
-        try:
-            self.retry_last_question(request_state, recipient_userid)
-        except requests.Timeout:
-            message = "重新提问超时了，请稍后按 Shift+V 再试一次。"
-            LOGGER.error("%s", message)
-            write_reply(self.settings.reply_file, message, recipient_userid)
-        except Exception:
-            message = "我没能重新回答上一句话，请稍后按 Shift+V 再试一次。"
-            LOGGER.exception("重试上一条问题失败")
-            write_reply(self.settings.reply_file, message, recipient_userid)
+        LOGGER.warning("忽略未知 Mod 事件：%s", action)
