@@ -84,6 +84,15 @@ describe('official feedback authentication', () => {
 })
 
 describe('model-led feedback routing', () => {
+  it('keeps structured game observation out of the current model prompt', () => {
+    const prompt = formatGamePrompt(undefined, {
+      text: '看看现在的画面',
+      context: { observation: { secretStructuredMarker: 'must-not-be-in-prompt' } },
+    }, undefined, false)
+    expect(prompt).not.toContain('Structured game observation')
+    expect(prompt).not.toContain('must-not-be-in-prompt')
+  })
+
   it('tells the model to submit an explicit missing-capability suggestion', () => {
     const adapter: AdapterHello = {
       adapterId: 'qimidandapigu.StardewAgent',

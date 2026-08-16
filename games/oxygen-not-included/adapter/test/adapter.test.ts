@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocketServer } from 'ws'
+import { resolveConfig } from '../src/config.js'
 import { OniAdapter } from '../src/index.js'
 
 async function until<T>(read: () => Promise<T | undefined>, timeoutMs = 3_000): Promise<T> {
@@ -19,12 +20,20 @@ describe('ONI Adapter file bridge', () => {
   const cleanups: Array<() => Promise<void>> = []
   afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup() })
 
+  it('resolves the default Windows bridge directory with path separators', () => {
+    const resolved = resolveConfig()
+    expect(resolved.bridgeRoot).toBe(join(process.env.LOCALAPPDATA ?? process.cwd(), 'XiaoTangYuan', 'oni-bridge'))
+  })
+
   it('grounds tool actions to the latest cursor and returns the C# result', async () => {
     const root = await mkdtemp(join(tmpdir(), 'oni-adapter-'))
-    const processId = 4242
+    const processId = process.pid
     const sessionDir = join(root, String(processId))
     await mkdir(sessionDir)
     await writeFile(join(sessionDir, 'session.json'), JSON.stringify({ processId }))
+    const staleDir = join(root, '99999999')
+    await mkdir(staleDir)
+    await writeFile(join(staleDir, 'session.json'), JSON.stringify({ processId: 99999999 }))
     const state = { id: 'state-1', method: 'state.update', params: { observation: { cursor: { cell: 123 }, duplicants: [] } } }
     await writeFile(join(sessionDir, 'outbox.json'), JSON.stringify({ events: [state] }))
 

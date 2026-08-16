@@ -2,6 +2,15 @@
 
 本项目分别发布 Harness 插件和游戏适配器；两条版本线独立递增。
 
+## Harness 插件 0.6.2 - 未发布
+
+- 游戏会话改为单次多模态调用：同一个支持图片输入的 Agent 直接接收玩家文字和当前游戏窗口截图并回答。
+- 删除“视觉模型先转文字、再调用对话模型”的串行双模型链路，当前模型提示词不再包含结构化 observation。
+- 通用 Push-to-Talk 默认键改为 F8，并明确一个 Harness profile 当前只支持一个全局语音键。
+- ONI Adapter 更新到 `0.1.3`：修复 Windows 桥目录拼接、旧 PID 选择和 WebSocket 连接期异常。
+- ONI C# Bridge 更新到 `0.6.1`：修复横向四帧精灵图被整张压缩显示的问题。
+- 完善缺氧安装、语音、单模型多模态链路和故障排查文档。
+
 ## Harness 插件 0.6.1 - 未发布
 
 - 将饥荒 Lua Mod、Python Adapter、Jingling 动画、测试和构建历史统一迁入 `games/dont-starve-together`，停止双仓库开发。

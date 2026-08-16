@@ -242,7 +242,7 @@ internal sealed class PushToTalkHook : IDisposable
     private HookProc? callback;
     private IntPtr hook;
     private uint threadId;
-    private int virtualKey = 0x56;
+    private int virtualKey = 0x77;
     private bool keyHeld;
 
     public PushToTalkHook(AudioDevices audio)

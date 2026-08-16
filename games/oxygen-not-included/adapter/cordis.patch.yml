@@ -5,4 +5,4 @@
         host: 127.0.0.1
         port: 32145
         installer:
-          manifestUrl: https://raw.githubusercontent.com/qimidandapigu/dsh-xiaotangyuan-game/main/distribution/oxygen-not-included-v1.json
+          manifestUrl: https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/oni-v0.6.1/oxygen-not-included-v1.json

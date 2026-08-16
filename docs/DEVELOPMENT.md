@@ -15,7 +15,7 @@ apps/harness-plugin
   通用 Agent、模型、视觉、ASR/TTS、媒体、安装器
 
 apps/windows-media-host
-  Windows 麦克风录制、前台进程限制、V 热键、WAV 播放
+  Windows 麦克风录制、前台进程限制、可配置热键、WAV 播放
 
 apps/feedback-receiver
   官方 Harness 签名校验、重放保护、私有 GitHub Issue 写入
@@ -122,7 +122,7 @@ dsh-xiaotangyuan-game-stardew-<adapter-version>.zip
 9. 饥荒包同时包含 `ChesterAI.exe`、`modmain.lua`、`modinfo.lua` 与 `anim/jingling.zip`。
 10. 反馈接收端只授予目标仓库 Issues 写权限，并验证签名、时间戳和 nonce。
 
-构建成功不等于游戏内验证成功。发布后仍需通过 SMAPI 重启游戏，并检查 `SMAPI-latest.txt` 和一次真实 T/V 对话。
+构建成功不等于游戏内验证成功。发布后仍需重启对应游戏，检查游戏日志，并完成一次真实文字/语音对话。缺氧还要确认 ONI Adapter 已建立到 `32145` 的连接、媒体 Host 存活且当前 PID 的桥目录被选中。
 
 ## 发布前检查表
 

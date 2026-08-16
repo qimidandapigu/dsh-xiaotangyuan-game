@@ -1,11 +1,11 @@
 # @qimidandapigu/dsh-xiaotangyuan-game
 
-运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.6.1`。
+运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.6.2`。
 
 ## 职责
 
 - Agent 会话与默认模型调用。
-- 按 Adapter 进程截取游戏窗口客户区与多模态模型路由。
+- 按 Adapter 进程截取游戏窗口客户区，并把玩家文字与截图一次性交给支持图片的 Agent。
 - ASR、TTS 与语音 Provider 调度。
 - Windows 麦克风、前台游戏热键和音频播放。
 - 本地 WebSocket Gateway。
@@ -16,7 +16,7 @@
 
 ## 安装
 
-`0.6.1` 是当前源码版本，尚未公开发布。公开稳定版仍为 `0.5.1`；开发测试请先在仓库根目录构建：
+`0.6.2` 是当前源码版本，尚未公开发布。公开稳定版仍为 `0.5.1`；开发测试请先在仓库根目录构建：
 
 ```powershell
 pnpm install
@@ -28,10 +28,10 @@ pnpm pack:plugin
 然后安装生成的本地包：
 
 ```powershell
-dsh plugin --profile web add ".\qimidandapigu-dsh-xiaotangyuan-game-0.6.1.tgz"
+dsh plugin --profile web add ".\qimidandapigu-dsh-xiaotangyuan-game-0.6.2.tgz"
 ```
 
-只有在 `plugin-v0.6.1` Release 实际创建后，才应使用对应的 GitHub 下载地址。
+只有在对应 Release 实际创建后，才应使用新的 GitHub 下载地址。
 
 安装后重启 Harness。默认监听：
 
@@ -50,7 +50,6 @@ Gateway 只允许 `127.0.0.1`、`localhost` 或 `::1`，不会暴露到局域网
 | `host` | `127.0.0.1` | Gateway 地址，仅允许回环地址 |
 | `port` | `32145` | Gateway 端口 |
 | `vision.enabled` | `true` | 启用游戏截图理解 |
-| `vision.prompt` | 内置中文观察提示 | 视觉模型观察指令 |
 | `vision.maxWidth` | `1280` | 游戏客户区截图的最大宽度 |
 | `speech.enabled` | `true` | 启用 ASR 与 TTS |
 | `speech.provider` | `auto` | 从已注册语音 Provider 中选择 |
@@ -59,7 +58,7 @@ Gateway 只允许 `127.0.0.1`、`localhost` 或 `::1`，不会暴露到局域网
 | `speech.ttsResourceId` | `seed-tts-1.0` | 当前火山 TTS 资源 |
 | `speech.ttsVoice` | 内置中文女声 | TTS 发音人 |
 | `media.enabled` | `true` | 启用 Windows 媒体 Host |
-| `media.pushToTalkVirtualKey` | `86` | Windows Virtual-Key，默认 `V` |
+| `media.pushToTalkVirtualKey` | `119` | Windows Virtual-Key，默认 `F8` |
 | `media.executablePath` | 插件内置路径 | 自定义媒体 Host 路径 |
 | `installers.dontStarve.manifestUrl` | 官方 v1 清单 | 饥荒安装包发布清单 |
 | `installers.dontStarve.archivePath` | 无 | 仅供本地开发的绝对 ZIP 路径；必须同时配置版本和 SHA-256 |
@@ -80,7 +79,7 @@ feedback:
 
 ## Provider 原则
 
-Provider 接口是厂商无关的，但 `0.6.1` 实际注册的语音实现只有 `VolcengineSpeechProvider`。新增厂商时应实现通用 `SpeechCapabilityProvider`，不能修改任何游戏 Adapter。
+Provider 接口是厂商无关的，但 `0.6.2` 实际注册的语音实现只有 `VolcengineSpeechProvider`。新增厂商时应实现通用 `SpeechCapabilityProvider`，不能修改任何游戏 Adapter。
 
 所有真实密钥通过 `ctx.credentials.resolve(ref)` 在操作时解析。插件配置只保存凭据引用，不缓存或持久化秘密。
 
@@ -91,12 +90,12 @@ Provider 接口是厂商无关的，但 `0.6.1` 实际注册的语音实现只�
                  ↓
 媒体 Host 只接受前台且已连接的游戏进程，并只截取客户区
                  ↓
-按住 V → 录制默认麦克风 → 松开 V
+按住配置键 → 录制默认麦克风 → 松开
                  ↓
-ASR → 游戏 Agent → TTS → Windows 播放
+ASR → [玩家文字, 游戏截图] → 单次多模态 Agent → TTS → Windows 播放
 ```
 
-`Shift+V`、`Ctrl+V`、`Alt+V` 不会触发普通按住说话，方便游戏 Adapter 把组合键用于“重试”等游戏专属动作。Gateway 还提供 `chat.retry`（保留会话但禁止重复反馈）和 `assistant.compose`（一次性生成，不污染对话记忆）。
+游戏 Agent 直接使用支持图片输入的模型，不先生成视觉描述，也不再串接第二个对话模型；当前提示词不包含 Adapter 的结构化 observation。默认 `F8` 仅在游戏窗口位于前台时触发录音。一个 profile 当前只有一个全局键，可用 Virtual-Key `81` 配置 Q、`86` 配置 V。Gateway 还提供 `chat.retry`（保留会话但禁止重复反馈）和 `assistant.compose`（一次性生成，不污染对话记忆）。
 
 媒体 Host 是 Windows x64 自包含程序，打包时必须确认 `.tgz` 中存在：
 

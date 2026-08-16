@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -27,12 +27,16 @@ export class OniAdapter {
   private timer?: ReturnType<typeof setInterval>
   private inboxDirty = false
 
-  constructor(private readonly root: string, private readonly gatewayUrl: string) {}
+  constructor(
+    private readonly root: string,
+    private readonly gatewayUrl: string,
+    private readonly processAlive: (processId: number) => boolean = OniAdapter.isProcessAlive,
+  ) {}
 
   start(): void { this.timer = setInterval(() => this.poll(), 100); this.poll() }
   close(): void {
     if (this.timer !== undefined) clearInterval(this.timer)
-    this.socket?.close()
+    this.disconnect()
     for (const item of this.pending.values()) { clearTimeout(item.timer); item.reject(new Error('ONI Adapter 已关闭')) }
     this.pending.clear()
   }
@@ -60,20 +64,31 @@ export class OniAdapter {
 
   private poll(): void {
     if (!existsSync(this.root)) return
+    const candidates: Array<{ directory: string, processId: number, modifiedAt: number }> = []
     for (const entry of readdirSync(this.root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const directory = join(this.root, entry.name)
-      const session = this.read(join(directory, 'session.json'))
+      const sessionPath = join(directory, 'session.json')
+      const session = this.read(sessionPath)
       const pid = session?.processId
       if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) continue
-      this.directory = directory
-      const state = this.socket?.readyState
-      if (this.processId !== pid || (state !== WebSocket.OPEN && state !== WebSocket.CONNECTING)) this.connect(pid)
-      const events = this.read(join(directory, 'outbox.json'))?.events
-      if (Array.isArray(events)) for (const raw of events) this.consume(raw)
-      this.flushInbox()
-      break
+      if (!this.processAlive(pid)) continue
+      candidates.push({ directory, processId: pid, modifiedAt: statSync(sessionPath).mtimeMs })
     }
+    const selected = candidates.sort((left, right) => right.modifiedAt - left.modifiedAt)[0]
+    if (selected === undefined) {
+      this.directory = undefined
+      this.observation = undefined
+      this.processId = undefined
+      this.disconnect()
+      return
+    }
+    this.directory = selected.directory
+    const state = this.socket?.readyState
+    if (this.processId !== selected.processId || (state !== WebSocket.OPEN && state !== WebSocket.CONNECTING)) this.connect(selected.processId)
+    const events = this.read(join(selected.directory, 'outbox.json'))?.events
+    if (Array.isArray(events)) for (const raw of events) this.consume(raw)
+    this.flushInbox()
   }
 
   private consume(raw: unknown): void {
@@ -100,9 +115,11 @@ export class OniAdapter {
   }
 
   private connect(processId: number): void {
-    this.socket?.close(); this.processId = processId
+    this.disconnect(); this.processId = processId
     const socket = this.socket = new WebSocket(this.gatewayUrl)
-    socket.on('open', () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: `oni-hello-${processId}`, method: 'adapter.hello', params: { adapterId: 'qimidandapigu.oxygen-not-included-fairy', gameId: 'oxygen-not-included', version: '0.1.0', protocolVersion: '1.0', processId } })))
+    socket.on('open', () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: `oni-hello-${processId}`, method: 'adapter.hello', params: { adapterId: 'qimidandapigu.oxygen-not-included-fairy', gameId: 'oxygen-not-included', version: '0.1.3', protocolVersion: '1.0', processId } })))
+    socket.on('error', () => { if (this.socket === socket) this.socket = undefined })
+    socket.on('close', () => { if (this.socket === socket) this.socket = undefined })
     socket.on('message', raw => {
       try {
         const value = JSON.parse(raw.toString()) as { id?: string, method?: string, params?: ObjectValue, result?: { reply?: string }, error?: { message?: string } }
@@ -130,6 +147,20 @@ export class OniAdapter {
   }
 
   private read(path: string): ObjectValue | undefined { try { return JSON.parse(readFileSync(path, 'utf8')) as ObjectValue } catch { return undefined } }
+
+  private disconnect(): void {
+    const socket = this.socket
+    if (socket === undefined) return
+    this.socket = undefined
+    socket.on('error', () => { /* closing a CONNECTING socket emits an error in ws */ })
+    if (socket.readyState === WebSocket.CONNECTING) socket.terminate()
+    else if (socket.readyState === WebSocket.OPEN) socket.close()
+  }
+
+  private static isProcessAlive(processId: number): boolean {
+    try { process.kill(processId, 0); return true }
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM' }
+  }
 }
 
 const resultSchema = { type: 'object', additionalProperties: false, properties: { success: { type: 'boolean', required: true }, reply: { type: 'string', required: true } } } as const

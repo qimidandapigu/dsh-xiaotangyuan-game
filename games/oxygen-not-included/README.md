@@ -10,6 +10,12 @@ generic Harness package does not depend on it, so other players do not download 
 AI credentials, screenshot capture, ASR, TTS, memory, and model selection belong to
 AIHarness, not to the Mod. The Bridge contains no direct model or speech client.
 
+Current compatible versions are ONI Adapter `0.1.3`, C# Bridge `0.6.1`, and
+Harness plugin `0.6.2`. The Harness sends the player text and current game-window
+image to one image-capable Agent. It does not run a separate image-to-text model
+before the conversation model, and it currently omits structured ONI observation
+from the model prompt.
+
 Build the bridge with:
 
 ```powershell
@@ -32,6 +38,13 @@ After the resulting `.release/oni/dsh-xiaotangyuan-game-oni-<version>.zip` is
 published under the matching `oni-v<version>` GitHub Release, players can ask
 Harness to detect and install the Mod. The installer downloads only this C#
 Bridge; the TypeScript Adapter remains a separately installed Harness plugin.
+
+The Bridge is installed under the Klei user Mod directory rather than the Steam
+game directory:
+
+```text
+%USERPROFILE%\Documents\Klei\OxygenNotIncluded\mods\Local\DoubaoAI
+```
 
 Pass `-p:GameManagedDir=<ONI managed directory>` if the local Steam installation is not at
 the configured path. Do not package `bin/`, `obj/`, `dist/`, logs, or a local `config.json`.

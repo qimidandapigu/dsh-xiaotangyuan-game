@@ -6,15 +6,17 @@
 
 | 项目 | 要求 |
 |---|---|
-| DeepSeek Harness 插件 | 源码 `0.6.1`；最新公开 Release `0.5.1` |
+| DeepSeek Harness 插件 | 源码 `0.6.2`；最新公开 Release `0.5.1` |
 | Stardew Valley | `1.6.15` 或更高 |
 | SMAPI | `4.4.0` 或更高 |
 | Content Patcher | 安装器固定为 `2.9.1` |
 | TrinketTinker | 安装器固定为 `1.9.0` |
 | 语音媒体 Host | Windows x64 |
 | 饥荒联机版 Mod | `0.2.18` |
+| 缺氧 Adapter | `0.1.3` |
+| 缺氧 C# Bridge | `0.6.1` |
 
-文字对话和游戏适配器不应依赖具体模型厂商。当前 `0.6.1` 源码中的语音 Provider 实现是火山引擎；视觉能力由 DSH 中支持图片输入的模型提供。
+文字对话和游戏适配器不应依赖具体模型厂商。当前 `0.6.2` 源码中的语音 Provider 实现是火山引擎；游戏会话由 DSH 中支持图片输入的模型直接接收玩家文字和截图并回答，不再串联第二个对话模型。
 
 ## 1. 安装 Harness 插件
 
@@ -34,7 +36,7 @@ dsh plugin --profile web list
 @qimidandapigu/dsh-xiaotangyuan-game 0.5.1
 ```
 
-上面的地址是当前已公开稳定版。饥荒安装器、客户窗口截图和自动反馈属于 `0.6.1` 源码；在 `plugin-v0.6.1` Release 实际发布前，应从仓库构建 `.tgz` 后本地安装，不能使用尚不存在的 Release URL。
+上面的地址是当前已公开稳定版。饥荒安装器、客户窗口截图、单次多模态 Agent 和自动反馈属于后续源码；在对应 Release 实际发布前，应从仓库构建 `.tgz` 后本地安装，不能使用尚不存在的 Release URL。
 
 安装或升级插件后必须重启 Harness。默认服务地址是：
 
@@ -112,16 +114,49 @@ dont_starve_mod_install
 
 首次验证应进入世界并找到切斯特：标题界面只能确认 Mod 加载，不能确认小汤圆实体和动画已经创建。
 
-## 5. 启动和使用
+## 5. 安装缺氧 Adapter 与 C# Bridge
+
+缺氧能力是可选 Adapter，不随通用 Harness 插件下载。先安装已经发布的 Adapter：
+
+```powershell
+dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/oni-v0.6.1/qimidandapigu-oni-adapter-0.1.3.tgz"
+```
+
+重启 Harness、刷新页面并新建对话，然后发送：
+
+```text
+检测并安装《缺氧》的 AI 精灵 Mod
+```
+
+Harness 会调用 `oxygen_not_included_mod_detect` 和 `oxygen_not_included_mod_install`，下载并校验 `0.6.1` Bridge，备份旧版本后安装到：
+
+```text
+%USERPROFILE%\Documents\Klei\OxygenNotIncluded\mods\Local\DoubaoAI
+```
+
+这符合缺氧本地 Mod 的目录约定，不安装到 Steam 游戏程序目录。安装时如果游戏正在运行，新 DLL 只能在退出并重新启动缺氧后生效。首次进入游戏若 Mod 被安全模式关闭，应在 Mods 页面重新启用后重启。
+
+## 6. 启动和使用
 
 星露谷安装完成后通过 SMAPI 启动或重启游戏；饥荒必须从带有上述启动项的 Steam 入口启动。已经运行的游戏不会动态加载新 Mod。
 
 进入存档后：
 
 - `T`：打开游戏内文字输入框。
-- `V`：游戏窗口在前台时按住录音，松开提交。
+- 配置的 Push-to-Talk 键：游戏窗口在前台时按住录音，松开提交。
 
-`T` 由 SMAPI 适配器处理。`V` 由 Harness 中的 Windows 媒体 Host 全局监听，并且只允许当前已连接的游戏进程触发。
+`T` 由 SMAPI 适配器处理。语音键由 Harness 中的 Windows 媒体 Host 全局监听，并且只允许当前已连接的前台游戏进程触发。源码默认值为 `F8`（Virtual-Key `119`）；`Q` 是 `81`，`V` 是 `86`。
+
+`0.6.2` 的一个 Harness profile 只支持一个全局 Push-to-Talk 键，不会按前台游戏自动切换。要在缺氧中使用 Q，可在 profile 的 `cordis.patch.yml` 中覆盖：
+
+```yaml
+- id: xiaotangyuan-game
+  config:
+    media:
+      pushToTalkVirtualKey: 81
+```
+
+如果同一 profile 还要让星露谷或饥荒使用 V，需要将该值改为 `86`；按游戏自动映射属于后续能力。
 
 ## 升级与备份
 

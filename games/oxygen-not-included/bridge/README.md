@@ -9,6 +9,14 @@
 
 模型、API Key、截图、录音、ASR、TTS、对话历史和长期记忆全部由 AIHarness 管理，本 Mod 不包含这些实现。
 
+当前 Bridge 版本为 `0.6.1`。它修复了四帧横向 Sprite Sheet 被整张压进一个方框的问题，精灵会按单帧动画绘制。Bridge 通过下面的用户目录加载，不应复制到 Steam 游戏程序集目录：
+
+```text
+%USERPROFILE%\Documents\Klei\OxygenNotIncluded\mods\Local\DoubaoAI
+```
+
+安装或更新 DLL 后必须完全退出并重新启动缺氧；Unity 不会热更新已经加载的 Mod 程序集。
+
 构建：
 
 ```powershell

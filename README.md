@@ -1,6 +1,6 @@
 # dsh-xiaotangyuan-game
 
-小汤圆游戏 AI 的单仓库。DeepSeek Harness 插件承载通用 Agent、模型、多模态、语音、结构化处理和安装能力；每个游戏只保留必须调用游戏 API 的薄适配器。
+小汤圆游戏 AI 的单仓库。DeepSeek Harness 插件承载通用 Agent、模型、多模态、语音、媒体和安装能力；每个游戏只保留必须调用游戏 API 的薄 Bridge，游戏知识与专属工具放进可选 Adapter。
 
 ```text
 玩家文字 / 麦克风 / 游戏窗口
@@ -8,7 +8,10 @@
 DeepSeek Harness + 小汤圆插件
 Agent、视觉、ASR、TTS、工具、安装器、媒体 Host
               ↓ protocol/v1
-游戏薄适配器
+可选游戏 Adapter
+游戏知识、专属工具、协议翻译与安装器
+              ↓ 本机桥协议
+游戏 Bridge / Mod
 读取状态、调用游戏 API、呈现回复
 ```
 
@@ -16,11 +19,12 @@ Agent、视觉、ASR、TTS、工具、安装器、媒体 Host
 
 | 组件 | 版本 | 状态与说明 |
 |---|---:|---|
-| Harness 插件 | `0.6.1` | 当前源码版本；通用运行时、媒体 Host、星露谷/饥荒安装器和自动反馈 |
+| Harness 插件 | `0.6.2` | 当前源码版本；单次多模态 Agent、媒体 Host、星露谷/饥荒安装器和自动反馈 |
 | 最新公开 Harness Release | `0.5.1` | 已发布稳定版，只包含此前的星露谷链路 |
 | 星露谷适配器 | `0.5.0` | SMAPI 薄桥接与小汤圆外观包 |
 | 饥荒联机版 Mod | `0.2.18` | Lua Mod、轻量 Python Adapter 与 Jingling 动画 |
-| 缺氧 Adapter | 独立包 | 可选 Harness 插件；游戏专属动作与安装器不进入通用包 |
+| 缺氧 Adapter | `0.1.3` | 可选 Harness 插件；游戏专属动作、知识与安装器不进入通用包 |
+| 缺氧 C# Bridge | `0.6.1` | 游戏观察、动作执行、文件桥与精灵 UI |
 | Content Patcher | `2.9.1` | 官方第三方资源加载组件 |
 | TrinketTinker | `1.9.0` | 官方第三方宠物跟随与渲染组件 |
 
@@ -40,7 +44,7 @@ dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-
 小汤圆，帮我检测并安装星露谷物语的 AI MOD
 ```
 
-当前 `0.6.1` 开发版需要从本仓库构建并安装生成的 `.tgz`；完成 Release 后再切换为 `plugin-v0.6.1` 下载地址。安装 `0.6.1` 后才可以使用饥荒安装指令：
+当前 `0.6.2` 开发版需要从本仓库构建并安装生成的 `.tgz`；完成对应 Release 后再切换为公开下载地址。安装 `0.6.1` 或更新版本后才可以使用饥荒安装指令：
 
 ```text
 检测并安装《饥荒联机版》的小汤圆 AI Mod
@@ -48,13 +52,25 @@ dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-
 
 安装或升级插件后，都要重启 DeepSeek Harness、刷新页面并新建对话。
 
+缺氧还需要独立安装 ONI Adapter，然后可直接让 Harness 安装 C# Bridge：
+
+```powershell
+dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/oni-v0.6.1/qimidandapigu-oni-adapter-0.1.3.tgz"
+```
+
+```text
+检测并安装《缺氧》的 AI 精灵 Mod
+```
+
 星露谷安装完成后通过 SMAPI 启动游戏；饥荒安装完成后，把 Harness 返回的一行内容复制到 Steam 启动选项，再从 Steam 启动游戏。
 
 进入存档后：
 
 - 星露谷按 `T` 输入文字并发送给小汤圆。
-- 支持的游戏保持前台时，按住 `V` 录音，松开后进行 ASR、Agent 回复和 TTS 播放。
+- 支持的游戏保持前台时，按住配置的 Push-to-Talk 键录音，松开后进行 ASR、单次多模态 Agent 回复和 TTS 播放。
 - 饥荒按 `Shift+V` 可重新生成上一条回答。
+
+通用源码默认键是 `F8`（Virtual-Key `119`）。当前版本每个 Harness profile 只有一个全局语音键；可将 `media.pushToTalkVirtualKey` 设为 `81` 使用 `Q`，或设为 `86` 使用 `V`。按前台游戏自动切换 Q/V 尚未实现，文档不会把它描述成现有能力。
 
 完整前置条件、凭据配置和升级说明见[安装指南](docs/INSTALLATION.md)。
 

@@ -12,7 +12,7 @@ namespace DoubaoAI.ONI.Patches
                 return;
 
             __instance.gameObject.AddComponent<DoubaoAIRuntime>();
-            Debug.Log("[DoubaoAI] 小精灵已进入当前游戏。按 Q 开始对话。");
+            Debug.Log("[DoubaoAI] 小精灵已进入当前游戏。按住 Q 说话，松开后发送。");
         }
     }
 

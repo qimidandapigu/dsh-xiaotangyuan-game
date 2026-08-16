@@ -62,7 +62,7 @@ public sealed class ModEntry : Mod
         helper.Events.GameLoop.ReturnedToTitle += this.OnReturnedToTitle;
 
         this.Monitor.Log(
-            $"小汤圆星露谷适配器已加载。按 {this.config.TextChatKey} 输入文字；在游戏为前台时按住 V 进行 Harness 语音对话。",
+            $"小汤圆星露谷适配器已加载。按 {this.config.TextChatKey} 输入文字；在游戏为前台时按住 F8 进行 Harness 语音对话。",
             LogLevel.Info
         );
     }

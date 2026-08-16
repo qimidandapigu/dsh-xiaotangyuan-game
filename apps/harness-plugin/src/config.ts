@@ -2,7 +2,6 @@ import { isAbsolute } from 'node:path'
 
 export interface VisionConfig {
   enabled?: boolean
-  prompt?: string
   maxWidth?: number
 }
 
@@ -53,7 +52,6 @@ export interface ResolvedConfig {
   port: number
   vision: {
     enabled: boolean
-    prompt: string
     maxWidth: number
   }
   speech: {
@@ -101,7 +99,7 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
     throw new Error('port must be an integer between 1024 and 65535')
   }
 
-  const pushToTalkVirtualKey = config.media?.pushToTalkVirtualKey ?? 0x56
+  const pushToTalkVirtualKey = config.media?.pushToTalkVirtualKey ?? 0x77
   if (!Number.isInteger(pushToTalkVirtualKey) || pushToTalkVirtualKey < 1 || pushToTalkVirtualKey > 255) {
     throw new Error('media.pushToTalkVirtualKey must be a Windows virtual-key code between 1 and 255')
   }
@@ -159,8 +157,6 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
     vision: {
       enabled: config.vision?.enabled ?? true,
       maxWidth: visionMaxWidth,
-      prompt: config.vision?.prompt
-        ?? '请观察这张游戏截图，只描述与玩家当前处境和问题相关的事实。不要猜测看不清的内容，使用简洁中文。',
     },
     speech: {
       enabled: config.speech?.enabled ?? true,

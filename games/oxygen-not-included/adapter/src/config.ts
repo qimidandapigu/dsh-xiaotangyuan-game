@@ -1,4 +1,4 @@
-import { isAbsolute } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 
 export interface Config {
   host?: string
@@ -34,7 +34,7 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
   }
 
   const manifestUrl = config.installer?.manifestUrl?.trim()
-    ?? 'https://raw.githubusercontent.com/qimidandapigu/dsh-xiaotangyuan-game/main/distribution/oxygen-not-included-v1.json'
+    ?? 'https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/oni-v0.6.1/oxygen-not-included-v1.json'
   const manifest = new URL(manifestUrl)
   if (manifest.protocol !== 'https:' && !(manifest.protocol === 'http:' && isLoopback(manifest.hostname))) {
     throw new Error('ONI installer manifestUrl must use HTTPS except for loopback development')
@@ -58,7 +58,7 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
     host,
     port,
     bridgeRoot: config.bridgeRoot?.trim()
-      || `${process.env.LOCALAPPDATA ?? process.cwd()}\XiaoTangYuan\oni-bridge`,
+      || join(process.env.LOCALAPPDATA ?? process.cwd(), 'XiaoTangYuan', 'oni-bridge'),
     installer: {
       manifestUrl,
       ...(archivePath === undefined

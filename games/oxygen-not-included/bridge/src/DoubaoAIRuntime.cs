@@ -128,7 +128,19 @@ namespace DoubaoAI.ONI
             Rect anchor = new Rect(Screen.width - right - 72, top, 72, 72);
             if (_halo != null) GUI.DrawTexture(new Rect(anchor.x - 12, anchor.y - 12, 96, 96), _halo, ScaleMode.ScaleToFit, true);
             Texture2D shown = _sprite != null ? _sprite : _fallbackSprite;
-            if (shown != null) GUI.DrawTexture(anchor, shown, ScaleMode.ScaleToFit, true);
+            if (shown != null)
+            {
+                int frameCount = shown.height > 0 && shown.width >= shown.height * 2
+                    ? Mathf.Max(1, shown.width / shown.height)
+                    : 1;
+                if (frameCount == 1) GUI.DrawTexture(anchor, shown, ScaleMode.ScaleToFit, true);
+                else
+                {
+                    int frame = Mathf.FloorToInt(Time.unscaledTime * 3f) % frameCount;
+                    float frameWidth = 1f / frameCount;
+                    GUI.DrawTextureWithTexCoords(anchor, shown, new Rect(frame * frameWidth, 0f, frameWidth, 1f), true);
+                }
+            }
             if (GUI.Button(anchor, GUIContent.none, GUIStyle.none)) _panelOpen = !_panelOpen;
             if (!_panelOpen && Time.unscaledTime < _bubbleUntil && !string.IsNullOrWhiteSpace(_reply))
             {

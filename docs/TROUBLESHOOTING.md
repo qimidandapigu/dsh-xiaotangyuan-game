@@ -7,12 +7,12 @@ SMAPI 是否加载 StardewAgentMod？
   ├─ 否 → 先看 SMAPI-latest.txt
   └─ 是 → T 文字是否能打开？
           ├─ 否 → 检查游戏内按键与 MOD 日志
-          └─ 是 → V 是否出现“正在听”？
+          └─ 是 → 配置的语音键是否出现“正在听”？
                   ├─ 否 → 检查 Harness、Gateway、媒体 Host、前台窗口
                   └─ 是 → 检查 ASR 凭据、TTS 和音频设备
 ```
 
-## T 和 V 都没反应
+## 星露谷 T 和语音键都没反应
 
 先检查 SMAPI 日志：
 
@@ -37,7 +37,7 @@ XiaoTangYuan Companion 0.5.0
 
 迁移后必须重启游戏，因为 SMAPI 只在启动阶段加载 MOD。
 
-## T 能用，V 没反应
+## 文字能用，但语音键没反应
 
 依次确认：
 
@@ -47,7 +47,7 @@ XiaoTangYuan Companion 0.5.0
 4. `127.0.0.1:32145` 正在监听。
 5. Windows 默认录音设备可用，且没有被独占。
 6. `media.enabled` 与 `speech.enabled` 没有关闭。
-7. 默认热键仍为 Windows Virtual-Key `86`，即字母 `V`。
+7. `media.pushToTalkVirtualKey` 与实际按键一致：`F8=119`、`Q=81`、`V=86`。源码默认是 F8，一个 Harness profile 当前只能配置一个全局语音键。
 
 只读检查命令：
 
@@ -135,6 +135,44 @@ Steam 启动项必须是一整行，并保留 `%command%`：
 
 平时先启动 Harness，再从 Steam 启动游戏。直接双击 `dontstarve_steam_x64.exe` 会绕过 Adapter 启动器。
 
+## 缺氧按 Q 没反应
+
+先确认 profile 中确实配置了 `pushToTalkVirtualKey: 81`，然后检查四层：
+
+```powershell
+dsh plugin --profile web list --depth 0
+Get-Process OxygenNotIncluded,XtyMediaHost -ErrorAction SilentlyContinue
+Get-NetTCPConnection -State Listen |
+  Where-Object LocalPort -In 3080,32145
+Get-NetTCPConnection -State Established -LocalPort 32145 -ErrorAction SilentlyContinue
+```
+
+正常状态应同时满足：
+
+- Harness 插件 `0.6.2` 和 ONI Adapter `0.1.3` 已安装；
+- `XtyMediaHost.exe` 正在运行；
+- 缺氧窗口位于前台；
+- `32145` 除监听外还有一个来自 ONI Adapter 的已建立连接；
+- 当前进程目录存在 `%LOCALAPPDATA%\XiaoTangYuan\oni-bridge\<PID>\session.json`。
+
+ONI Adapter `0.1.3` 修复了 Windows 桥目录丢失反斜杠、旧 PID 被错误选择，以及 CONNECTING WebSocket 关闭时拖垮 Harness 的问题。若目录中保留旧 PID 子目录无需手工删除；Adapter 只选择仍存活且最新的进程。
+
+出现“正在听你说话…”说明按键、前台进程和录音已经正常。随后若显示“语音识别成功但没有返回文本”，请检查默认麦克风是否正确并说满 1～2 秒，而不是继续排查 Q 键。
+
+## 缺氧精灵显示成四个小头像
+
+这是旧版把 `128x32` 的四帧横向 Sprite Sheet 整张压进方框导致的。确认 `mod_info.yaml` 为 `0.6.1` 或更新版本，并完全退出、重新启动缺氧；运行中的 Unity 不会热更新已经加载的 DLL。安装器会把旧版本保存在：
+
+```text
+%USERPROFILE%\Documents\Klei\OxygenNotIncluded\mods\.xiaotangyuan-backups
+```
+
+如果重启后 Mod 被关闭，检查 `mods.json` 中对应 `staticID` 的 `enabled`、`crash_count` 和顶层 `mod_load_in_progress`，并优先通过游戏 Mods 页面重新启用，避免安全模式反复覆盖配置。
+
+## 缺氧语音回复仍然慢
+
+Harness `0.6.2` 只调用一次支持图片输入的 Agent：输入数组包含玩家文字与当前游戏窗口截图，模型直接回答。它不再先生成视觉描述、再调用第二个对话模型，也不把结构化 observation 拼进当前提示词。仍有延迟时，分别观察 ASR、模型首字和 TTS；不要把一次图片模型调用误判成“思考模式”。
+
 ## 自动反馈没有生成 Issue
 
 只有模型判断为明确产品建议时才调用 `game_feedback_submit`。如果已经调用但提交失败，依次检查：
@@ -155,7 +193,7 @@ Steam 启动项必须是一整行，并保留 `%command%`：
 - 游戏名称、游戏 Mod/Adapter 版本和安装方式。
 - `StardewAgentMod`、Content Patcher、TrinketTinker 和外观包版本。
 - `SMAPI-latest.txt` 中从“Loading mods”到“Mods loaded and ready”的相关片段。
-- 按 `T`、按住 `V`、松开 `V` 分别出现什么现象。
+- 按 `T`、按住配置的语音键、松开后分别出现什么现象。
 - Harness 是否能监听 `32145`。
 
 请先遮盖 API Key、Token 和其他凭据；日志中不应主动加入这些秘密。

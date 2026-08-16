@@ -11,7 +11,7 @@ describe('game runtime configuration', () => {
     expect(config.speech.enabled).toBe(true)
     expect(config.speech.provider).toBe('auto')
     expect(config.speech.credentialRef).toBe('VOLCENGINE_API_KEY')
-    expect(config.media.pushToTalkVirtualKey).toBe(0x56)
+    expect(config.media.pushToTalkVirtualKey).toBe(0x77)
     expect(JSON.stringify(config)).not.toContain('apiKey')
   })
 

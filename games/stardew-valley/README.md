@@ -36,7 +36,7 @@
 注意：
 
 - `T` 是 `StardewAgentMod` 的游戏内按键，可在 `config.json` 中修改。
-- `V` 不是 SMAPI 按键；它由 Harness 的 Windows 媒体 Host 监听，可通过 `media.pushToTalkVirtualKey` 修改。
+- `F8` 不是 SMAPI 按键；它由 Harness 的 Windows 媒体 Host 监听，可通过 `media.pushToTalkVirtualKey` 修改。
 - 麦克风和扬声器不由游戏 MOD 直接访问。
 
 ## 游戏配置
