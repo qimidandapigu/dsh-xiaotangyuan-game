@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Xna.Framework.Graphics;
 using StardewModdingAPI;
 using StardewModdingAPI.Events;
 using StardewValley;
@@ -12,7 +13,8 @@ namespace StardewAgentMod;
 public sealed class ModEntry : Mod
 {
     private readonly ConcurrentQueue<Action> mainThreadActions = new();
-    private readonly SpeechBubble speechBubble = new();
+    private CompanionAvatar companion = null!;
+    private SpeechBubble speechBubble = null!;
     private ModConfig config = null!;
     private GameAgentClient client = null!;
     private object? latestObservation;
@@ -22,21 +24,33 @@ public sealed class ModEntry : Mod
     public override void Entry(IModHelper helper)
     {
         this.config = helper.ReadConfig<ModConfig>();
+        Texture2D companionTexture = helper.ModContent.Load<Texture2D>("assets/xiaotangyuan_companion.png");
+        this.companion = new CompanionAvatar(companionTexture);
+        this.speechBubble = new SpeechBubble(() => this.companion.WorldPosition);
         this.client = new GameAgentClient(this.config.GatewayUrl);
         this.client.AssistantPresented += text => this.mainThreadActions.Enqueue(() => this.speechBubble.Show(text));
         this.client.AssistantStatusChanged += (status, transcript) => this.mainThreadActions.Enqueue(() =>
         {
             if (status == "recording")
+            {
+                this.speechBubble.ShowStatus("正在听……");
                 Game1.addHUDMessage(new HUDMessage("小汤圆正在听……", HUDMessage.newQuest_type));
+            }
             else if (status == "thinking")
+            {
+                this.speechBubble.ShowStatus(string.IsNullOrWhiteSpace(transcript)
+                    ? "正在思考……"
+                    : $"听到：{transcript}\n正在思考……");
                 Game1.addHUDMessage(new HUDMessage(
                     string.IsNullOrWhiteSpace(transcript) ? "小汤圆正在思考……" : $"你说：{transcript}",
                     HUDMessage.newQuest_type
                 ));
+            }
         });
         this.client.AssistantFailed += message => this.mainThreadActions.Enqueue(() =>
         {
             this.Monitor.Log($"XiaoTangYuan interaction failed: {message}", LogLevel.Warn);
+            this.speechBubble.Show($"语音暂时失败：{message}");
             if (Context.IsWorldReady)
                 Game1.addHUDMessage(new HUDMessage($"小汤圆：{message}", HUDMessage.error_type));
         });
@@ -129,11 +143,14 @@ public sealed class ModEntry : Mod
     private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
     {
         while (this.mainThreadActions.TryDequeue(out Action? action)) action();
+        if (this.config.ShowCompanion) this.companion.Update();
     }
 
     private void OnRenderedWorld(object? sender, RenderedWorldEventArgs e)
     {
-        if (Context.IsWorldReady) this.speechBubble.Draw(e.SpriteBatch, this.config.BubbleYOffset);
+        if (!Context.IsWorldReady) return;
+        if (this.config.ShowCompanion) this.companion.Draw(e.SpriteBatch, this.config.CompanionScale);
+        this.speechBubble.Draw(e.SpriteBatch, this.config.BubbleYOffset);
     }
 
     private void OnReturnedToTitle(object? sender, ReturnedToTitleEventArgs e)
@@ -141,5 +158,7 @@ public sealed class ModEntry : Mod
         this.textRequestInFlight = false;
         this.observationInFlight = false;
         this.latestObservation = null;
+        this.speechBubble.Clear();
+        this.companion.Reset();
     }
 }
