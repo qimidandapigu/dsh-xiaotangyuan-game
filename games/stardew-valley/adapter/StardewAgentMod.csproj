@@ -3,7 +3,7 @@
     <TargetFramework>net6.0</TargetFramework>
     <RootNamespace>StardewAgentMod</RootNamespace>
     <AssemblyName>StardewAgentMod</AssemblyName>
-    <Version>0.4.0</Version>
+    <Version>0.5.0</Version>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <EnableModDeploy>false</EnableModDeploy>
@@ -11,11 +11,5 @@
 
   <ItemGroup>
     <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.4.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="assets\xiaotangyuan_companion.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
   </ItemGroup>
 </Project>

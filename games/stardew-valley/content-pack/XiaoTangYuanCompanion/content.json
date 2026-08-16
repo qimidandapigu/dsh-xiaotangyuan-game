@@ -1,0 +1,60 @@
+{
+  "Format": "2.9.0",
+  "Changes": [
+    {
+      "LogName": "注册小汤圆物品图标",
+      "Action": "Load",
+      "Target": "Mods/{{ModId}}/icon",
+      "FromFile": "assets/xiaotangyuan_icon.png"
+    },
+    {
+      "LogName": "注册小汤圆同伴精灵",
+      "Action": "Load",
+      "Target": "Mods/{{ModId}}/companion",
+      "FromFile": "assets/xiaotangyuan_companion.png"
+    },
+    {
+      "LogName": "添加小汤圆隐藏饰品",
+      "Action": "EditData",
+      "Target": "Data/Trinkets",
+      "Entries": {
+        "{{ModId}}_Companion": {
+          "Id": "{{ModId}}_Companion",
+          "DisplayName": "小汤圆",
+          "Description": "连接 DeepSeek Harness 的游戏 AI 同伴。",
+          "Texture": "Mods/{{ModId}}/icon",
+          "SheetIndex": 0,
+          "DropsNaturally": false,
+          "CanBeReforged": false
+        }
+      }
+    },
+    {
+      "LogName": "交给 TrinketTinker 管理小汤圆同伴",
+      "Action": "EditData",
+      "Target": "mushymato.TrinketTinker/Tinker",
+      "Entries": {
+        "{{ModId}}_Companion": {
+          "VariantsBase": {
+            "Width": 32,
+            "Height": 32
+          },
+          "Variants": [
+            {
+              "Texture": "Mods/{{ModId}}/companion",
+              "TextureScale": 2.0
+            }
+          ],
+          "Motion": {
+            "MotionClass": "Hover",
+            "AlwaysMoving": true,
+            "DirectionMode": "DRUL",
+            "FrameLength": 1,
+            "Interval": 200,
+            "HideDuringEvents": false
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,10 +1,28 @@
 {
   "Name": "XiaoTangYuan Game AI - Stardew Valley",
   "Author": "qimidandapigu",
-  "Version": "0.4.0",
-  "Description": "Thin Stardew Valley adapter with a bundled XiaoTangYuan companion, voice feedback, structured state, and DeepSeek Harness integration.",
+  "Version": "0.5.0",
+  "Description": "Thin Stardew Valley AI adapter using Content Patcher and TrinketTinker for companion presentation.",
   "UniqueID": "qimidandapigu.StardewAgent",
   "EntryDll": "StardewAgentMod.dll",
-  "MinimumApiVersion": "4.0.0",
+  "MinimumApiVersion": "4.4.0",
+  "MinimumGameVersion": "1.6.15",
+  "Dependencies": [
+    {
+      "UniqueID": "Pathoschild.ContentPatcher",
+      "MinimumVersion": "2.9.0",
+      "IsRequired": true
+    },
+    {
+      "UniqueID": "mushymato.TrinketTinker",
+      "MinimumVersion": "1.9.0",
+      "IsRequired": true
+    },
+    {
+      "UniqueID": "qimidandapigu.XiaoTangYuanCompanion",
+      "MinimumVersion": "0.5.0",
+      "IsRequired": true
+    }
+  ],
   "UpdateKeys": []
 }

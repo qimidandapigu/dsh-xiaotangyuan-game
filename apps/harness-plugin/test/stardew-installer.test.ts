@@ -5,10 +5,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   inspectStardewPath,
   isCompatibleStardewRelease,
+  compareStableVersions,
   parseStardewDistributionManifest,
   parseSteamLibraryPaths,
   preserveStardewConfig,
   selectStardewRelease,
+  stripJsonComments,
 } from '../src/installation/stardew-valley.js'
 
 const temporaryPaths: string[] = []
@@ -48,15 +50,41 @@ describe('preserveStardewConfig', () => {
 
 describe('parseStardewDistributionManifest', () => {
   const validManifest = {
-    schemaVersion: 1,
-    tag: 'stardew-v0.4.0',
-    version: '0.4.0',
+    schemaVersion: 2,
+    tag: 'stardew-v0.5.0',
+    version: '0.5.0',
     archive: {
-      name: 'dsh-xiaotangyuan-game-stardew-0.4.0.zip',
-      url: 'https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/stardew-v0.4.0/dsh-xiaotangyuan-game-stardew-0.4.0.zip',
-      size: 39081,
+      name: 'dsh-xiaotangyuan-game-stardew-0.5.0.zip',
+      url: 'https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/stardew-v0.5.0/dsh-xiaotangyuan-game-stardew-0.5.0.zip',
+      size: 40000,
       sha256: '0a1b712f4ca0498e79d742cfe6c0c3fea9d49a64300505e1590044da7a233a3b',
     },
+    components: [
+      {
+        uniqueId: 'Pathoschild.ContentPatcher',
+        name: 'Content Patcher',
+        version: '2.9.1',
+        folderName: 'ContentPatcher',
+        archive: {
+          name: 'ContentPatcher-2.9.1.zip',
+          url: 'https://www.curseforge.com/api/v1/mods/309243/files/7759981/download',
+          size: 389967,
+          sha256: '22962ecbeda204d207f66f4dded727a2ce67134f7decdd249c1024bbc4576817',
+        },
+      },
+      {
+        uniqueId: 'mushymato.TrinketTinker',
+        name: 'TrinketTinker',
+        version: '1.9.0',
+        folderName: 'TrinketTinker',
+        archive: {
+          name: 'TrinketTinker.1.9.0.zip',
+          url: 'https://github.com/Mushymato/TrinketTinker/releases/download/1.9.0/TrinketTinker.1.9.0.zip',
+          size: 164458,
+          sha256: 'cb04fe77e43607c3914f68c781371a3c0442accad794ebb73de34666707dd4ef',
+        },
+      },
+    ],
   }
 
   it('accepts the official static release manifest', () => {
@@ -64,7 +92,7 @@ describe('parseStardewDistributionManifest', () => {
   })
 
   it('rejects a mismatched version or foreign archive URL', () => {
-    expect(() => parseStardewDistributionManifest({ ...validManifest, version: '0.3.0' })).toThrow('版本与标签不一致')
+    expect(() => parseStardewDistributionManifest({ ...validManifest, version: '0.4.0' })).toThrow('版本与标签不一致')
     expect(() => parseStardewDistributionManifest({
       ...validManifest,
       archive: { ...validManifest.archive, url: 'https://example.test/mod.zip' },
@@ -76,6 +104,27 @@ describe('parseStardewDistributionManifest', () => {
       ...validManifest,
       archive: { ...validManifest.archive, sha256: 'not-a-checksum' },
     })).toThrow('无效的 SHA-256')
+  })
+})
+
+describe('version and JSONC helpers', () => {
+  it('compares stable semantic versions', () => {
+    expect(compareStableVersions('2.9.1', '2.9.0')).toBe(1)
+    expect(compareStableVersions('1.9.0', '1.9.0')).toBe(0)
+    expect(compareStableVersions('0.5.0', '1.0.0')).toBe(-1)
+    expect(compareStableVersions('latest', '1.0.0')).toBeUndefined()
+  })
+
+  it('removes manifest comments without damaging URL strings', () => {
+    const value = JSON.parse(stripJsonComments(`{
+      /* generated manifest */
+      "UniqueID": "mushymato.TrinketTinker", // framework
+      "Update": "https://github.com/Mushymato/TrinketTinker"
+    }`)) as { UniqueID: string, Update: string }
+    expect(value).toEqual({
+      UniqueID: 'mushymato.TrinketTinker',
+      Update: 'https://github.com/Mushymato/TrinketTinker',
+    })
   })
 })
 
@@ -98,7 +147,10 @@ describe('inspectStardewPath', () => {
     await writeFile(join(root, process.platform === 'win32' ? 'StardewModdingAPI.exe' : 'StardewModdingAPI'), '')
     const modPath = join(root, 'Mods', 'StardewAgentMod')
     await mkdir(modPath, { recursive: true })
-    await writeFile(join(modPath, 'manifest.json'), JSON.stringify({ Version: '0.1.0' }))
+    await writeFile(join(modPath, 'manifest.json'), JSON.stringify({
+      UniqueID: 'qimidandapigu.StardewAgent',
+      Version: '0.1.0',
+    }))
 
     await expect(inspectStardewPath(root)).resolves.toMatchObject({
       found: true,
@@ -133,7 +185,8 @@ describe('selectStardewRelease', () => {
 
   it('rejects releases older than the first Harness-owned voice adapter', () => {
     expect(isCompatibleStardewRelease('stardew-v0.2.0')).toBe(false)
-    expect(isCompatibleStardewRelease('stardew-v0.3.0')).toBe(true)
+    expect(isCompatibleStardewRelease('stardew-v0.3.0')).toBe(false)
+    expect(isCompatibleStardewRelease('stardew-v0.5.0')).toBe(true)
     expect(isCompatibleStardewRelease('stardew-v1.0.0')).toBe(true)
   })
 })

@@ -5,6 +5,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rename,
   rm,
@@ -18,13 +19,17 @@ import extract from 'extract-zip'
 
 const execFileAsync = promisify(execFile)
 const RELEASES_API = 'https://api.github.com/repos/qimidandapigu/dsh-xiaotangyuan-game/releases?per_page=50'
-const DISTRIBUTION_MANIFEST_URL = 'https://raw.githubusercontent.com/qimidandapigu/dsh-xiaotangyuan-game/main/distribution/stardew-valley.json'
+const DISTRIBUTION_MANIFEST_URL = 'https://raw.githubusercontent.com/qimidandapigu/dsh-xiaotangyuan-game/main/distribution/stardew-valley-v2.json'
 const RELEASE_DOWNLOAD_PREFIX = 'https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/'
 const STARDEW_RELEASE_PREFIX = 'stardew-v'
-const MINIMUM_ADAPTER_VERSION = '0.3.0'
+const MINIMUM_ADAPTER_VERSION = '0.5.0'
 const STARDEW_ASSET_PREFIX = 'dsh-xiaotangyuan-game-stardew-'
 const MOD_FOLDER_NAME = 'StardewAgentMod'
+const COMPANION_FOLDER_NAME = 'XiaoTangYuanCompanion'
+const ADAPTER_UNIQUE_ID = 'qimidandapigu.StardewAgent'
+const COMPANION_UNIQUE_ID = 'qimidandapigu.XiaoTangYuanCompanion'
 const MAX_ARCHIVE_SIZE = 50 * 1024 * 1024
+const MAX_COMPONENT_ARCHIVE_SIZE = 10 * 1024 * 1024
 
 interface ReleaseAsset {
   name: string
@@ -39,9 +44,18 @@ export interface GithubRelease {
 }
 
 export interface StardewDistributionManifest {
-  schemaVersion: 1
+  schemaVersion: 2
   tag: string
   version: string
+  archive: ReleaseAsset & { sha256: string }
+  components: StardewComponentSpec[]
+}
+
+export interface StardewComponentSpec {
+  uniqueId: 'Pathoschild.ContentPatcher' | 'mushymato.TrinketTinker'
+  name: string
+  version: string
+  folderName: string
   archive: ReleaseAsset & { sha256: string }
 }
 
@@ -50,6 +64,7 @@ interface InstallableStardewRelease {
   archive: ReleaseAsset
   expectedSha256?: string
   checksumAsset?: ReleaseAsset
+  components: StardewComponentSpec[]
 }
 
 interface ModManifest {
@@ -65,6 +80,9 @@ export interface StardewDetection {
   modsPath?: string
   smapiInstalled: boolean
   installedVersion?: string
+  contentPatcherVersion?: string
+  trinketTinkerVersion?: string
+  companionPackVersion?: string
 }
 
 export interface StardewInstallResult {
@@ -73,7 +91,58 @@ export interface StardewInstallResult {
   gamePath: string
   modPath: string
   backupPath?: string
+  components: string
 }
+
+interface InstalledMod {
+  path: string
+  version: string
+}
+
+interface PreparedPackage {
+  name: string
+  uniqueId: string
+  version: string
+  folderName: string
+  sourcePath: string
+  preserveConfig?: boolean
+}
+
+interface AppliedPackage {
+  name: string
+  uniqueId: string
+  version: string
+  destination: string
+  action: 'installed' | 'updated' | 'kept'
+  backupPath?: string
+}
+
+const FALLBACK_COMPONENTS: StardewComponentSpec[] = [
+  {
+    uniqueId: 'Pathoschild.ContentPatcher',
+    name: 'Content Patcher',
+    version: '2.9.1',
+    folderName: 'ContentPatcher',
+    archive: {
+      name: 'ContentPatcher-2.9.1.zip',
+      url: 'https://www.curseforge.com/api/v1/mods/309243/files/7759981/download',
+      size: 389967,
+      sha256: '22962ecbeda204d207f66f4dded727a2ce67134f7decdd249c1024bbc4576817',
+    },
+  },
+  {
+    uniqueId: 'mushymato.TrinketTinker',
+    name: 'TrinketTinker',
+    version: '1.9.0',
+    folderName: 'TrinketTinker',
+    archive: {
+      name: 'TrinketTinker.1.9.0.zip',
+      url: 'https://github.com/Mushymato/TrinketTinker/releases/download/1.9.0/TrinketTinker.1.9.0.zip',
+      size: 164458,
+      sha256: 'cb04fe77e43607c3914f68c781371a3c0442accad794ebb73de34666707dd4ef',
+    },
+  },
+]
 
 async function exists(path: string): Promise<boolean> {
   try {
@@ -84,12 +153,66 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+export function stripJsonComments(text: string): string {
+  let output = ''
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < text.length; index += 1) {
+    const current = text[index]!
+    const next = text[index + 1]
+    if (inString) {
+      output += current
+      if (escaped) escaped = false
+      else if (current === '\\') escaped = true
+      else if (current === '"') inString = false
+      continue
+    }
+    if (current === '"') {
+      inString = true
+      output += current
+      continue
+    }
+    if (current === '/' && next === '/') {
+      while (index < text.length && text[index] !== '\n') index += 1
+      output += '\n'
+      continue
+    }
+    if (current === '/' && next === '*') {
+      index += 2
+      while (index < text.length && !(text[index] === '*' && text[index + 1] === '/')) {
+        if (text[index] === '\n') output += '\n'
+        index += 1
+      }
+      index += 1
+      continue
+    }
+    output += current
+  }
+  return output
+}
+
 async function readManifest(path: string): Promise<ModManifest | undefined> {
   try {
-    return JSON.parse(await readFile(path, 'utf8')) as ModManifest
+    return JSON.parse(stripJsonComments(await readFile(path, 'utf8'))) as ModManifest
   } catch {
     return undefined
   }
+}
+
+async function findInstalledMod(modsPath: string, uniqueId: string): Promise<InstalledMod | undefined> {
+  try {
+    for (const entry of await readdir(modsPath, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.includes('.backup-')) continue
+      const path = join(modsPath, entry.name)
+      const manifest = await readManifest(join(path, 'manifest.json'))
+      if (manifest?.UniqueID === uniqueId && manifest.Version !== undefined) {
+        return { path, version: manifest.Version }
+      }
+    }
+  } catch {
+    // The Mods directory may not exist yet.
+  }
+  return undefined
 }
 
 export function parseSteamLibraryPaths(vdf: string): string[] {
@@ -159,7 +282,12 @@ export async function inspectStardewPath(gamePath: string): Promise<StardewDetec
       ? ['StardewModdingAPI', 'Contents/MacOS/StardewModdingAPI']
       : ['StardewModdingAPI']
   const smapiInstalled = (await Promise.all(smapiMarkers.map(marker => exists(join(resolved, marker))))).some(Boolean)
-  const installed = await readManifest(join(modsPath, MOD_FOLDER_NAME, 'manifest.json'))
+  const [installed, contentPatcher, trinketTinker, companionPack] = await Promise.all([
+    findInstalledMod(modsPath, ADAPTER_UNIQUE_ID),
+    findInstalledMod(modsPath, 'Pathoschild.ContentPatcher'),
+    findInstalledMod(modsPath, 'mushymato.TrinketTinker'),
+    findInstalledMod(modsPath, COMPANION_UNIQUE_ID),
+  ])
 
   return {
     found: true,
@@ -167,7 +295,10 @@ export async function inspectStardewPath(gamePath: string): Promise<StardewDetec
     gamePath: resolved,
     modsPath,
     smapiInstalled,
-    ...(installed?.Version === undefined ? {} : { installedVersion: installed.Version }),
+    ...(installed === undefined ? {} : { installedVersion: installed.version }),
+    ...(contentPatcher === undefined ? {} : { contentPatcherVersion: contentPatcher.version }),
+    ...(trinketTinker === undefined ? {} : { trinketTinkerVersion: trinketTinker.version }),
+    ...(companionPack === undefined ? {} : { companionPackVersion: companionPack.version }),
   }
 }
 
@@ -248,10 +379,58 @@ export function isCompatibleStardewRelease(tag: string): boolean {
   return true
 }
 
+function parseComponentSpec(value: unknown): StardewComponentSpec {
+  if (typeof value !== 'object' || value === null) throw new Error('星露谷发布清单包含无效的组件')
+  const component = value as Partial<StardewComponentSpec>
+  const expected = FALLBACK_COMPONENTS.find(candidate => candidate.uniqueId === component.uniqueId)
+  if (expected === undefined) throw new Error('星露谷发布清单包含未知组件')
+  if (component.name !== expected.name || component.folderName !== expected.folderName) {
+    throw new Error(`星露谷组件 ${expected.uniqueId} 的名称或目录无效`)
+  }
+  if (typeof component.version !== 'string' || numericVersion(component.version) === undefined) {
+    throw new Error(`星露谷组件 ${expected.uniqueId} 的版本无效`)
+  }
+  if ((compareStableVersions(component.version, expected.version) ?? -1) < 0) {
+    throw new Error(`星露谷组件 ${expected.uniqueId} 低于最低版本 ${expected.version}`)
+  }
+  if (typeof component.archive !== 'object' || component.archive === null) {
+    throw new Error(`星露谷组件 ${expected.uniqueId} 缺少安装包`)
+  }
+  const archive = component.archive as Partial<StardewComponentSpec['archive']>
+  if (typeof archive.name !== 'string' || !archive.name.endsWith('.zip')) {
+    throw new Error(`星露谷组件 ${expected.uniqueId} 的安装包名称无效`)
+  }
+  const officialUrl = expected.uniqueId === 'Pathoschild.ContentPatcher'
+    ? /^https:\/\/www\.curseforge\.com\/api\/v1\/mods\/309243\/files\/\d+\/download$/.test(archive.url ?? '')
+    : archive.url === `https://github.com/Mushymato/TrinketTinker/releases/download/${component.version}/TrinketTinker.${component.version}.zip`
+  if (!officialUrl) throw new Error(`星露谷组件 ${expected.uniqueId} 包含非官方安装地址`)
+  if (typeof archive.size !== 'number'
+    || !Number.isSafeInteger(archive.size)
+    || archive.size <= 0
+    || archive.size > MAX_COMPONENT_ARCHIVE_SIZE) {
+    throw new Error(`星露谷组件 ${expected.uniqueId} 的安装包大小无效`)
+  }
+  if (typeof archive.sha256 !== 'string' || !/^[a-fA-F0-9]{64}$/.test(archive.sha256)) {
+    throw new Error(`星露谷组件 ${expected.uniqueId} 的 SHA-256 无效`)
+  }
+  return {
+    uniqueId: expected.uniqueId,
+    name: expected.name,
+    version: component.version,
+    folderName: expected.folderName,
+    archive: {
+      name: archive.name,
+      url: archive.url!,
+      size: archive.size,
+      sha256: archive.sha256.toLowerCase(),
+    },
+  }
+}
+
 export function parseStardewDistributionManifest(value: unknown): StardewDistributionManifest {
   if (typeof value !== 'object' || value === null) throw new Error('星露谷发布清单不是对象')
   const record = value as Partial<StardewDistributionManifest>
-  if (record.schemaVersion !== 1) throw new Error('星露谷发布清单版本不受支持')
+  if (record.schemaVersion !== 2) throw new Error('星露谷发布清单版本不受支持')
   if (typeof record.tag !== 'string' || !isCompatibleStardewRelease(record.tag)) {
     throw new Error('星露谷发布清单包含无效或不兼容的版本标签')
   }
@@ -277,8 +456,18 @@ export function parseStardewDistributionManifest(value: unknown): StardewDistrib
   if (typeof archive.sha256 !== 'string' || !/^[a-fA-F0-9]{64}$/.test(archive.sha256)) {
     throw new Error('星露谷发布清单包含无效的 SHA-256')
   }
+  if (!Array.isArray(record.components)) throw new Error('星露谷发布清单缺少第三方组件')
+  const components = record.components.map(parseComponentSpec)
+  if (new Set(components.map(component => component.uniqueId)).size !== components.length) {
+    throw new Error('星露谷发布清单包含重复组件')
+  }
+  for (const expected of FALLBACK_COMPONENTS) {
+    if (!components.some(component => component.uniqueId === expected.uniqueId)) {
+      throw new Error(`星露谷发布清单缺少组件 ${expected.name}`)
+    }
+  }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     tag: record.tag,
     version,
     archive: {
@@ -287,6 +476,7 @@ export function parseStardewDistributionManifest(value: unknown): StardewDistrib
       size: archive.size,
       sha256: archive.sha256.toLowerCase(),
     },
+    components,
   }
 }
 
@@ -297,6 +487,7 @@ async function releaseFromManifest(signal: AbortSignal): Promise<InstallableStar
     tagName: manifest.tag,
     archive: manifest.archive,
     expectedSha256: manifest.archive.sha256,
+    components: manifest.components,
   }
 }
 
@@ -311,7 +502,7 @@ async function releaseFromGithubApi(signal: AbortSignal): Promise<InstallableSta
   if (archive === undefined || checksumAsset === undefined) {
     throw new Error('latest XiaoTangYuan Stardew release is missing its zip or SHA256SUMS.txt')
   }
-  return { tagName: release.tag_name, archive, checksumAsset }
+  return { tagName: release.tag_name, archive, checksumAsset, components: FALLBACK_COMPONENTS }
 }
 
 async function latestRelease(signal: AbortSignal): Promise<InstallableStardewRelease> {
@@ -351,6 +542,129 @@ export async function preserveStardewConfig(backupPath: string, destination: str
   return true
 }
 
+export function compareStableVersions(left: string, right: string): number | undefined {
+  const leftParts = numericVersion(left)
+  const rightParts = numericVersion(right)
+  if (leftParts === undefined || rightParts === undefined) return undefined
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index]! > rightParts[index]!) return 1
+    if (leftParts[index]! < rightParts[index]!) return -1
+  }
+  return 0
+}
+
+async function downloadVerifiedArchive(
+  asset: ReleaseAsset,
+  expectedSha256: string,
+  maximumSize: number,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
+  if (asset.size > maximumSize) throw new Error(`refusing oversized archive ${asset.name}`)
+  const response = await fetchChecked(asset.url, signal, 'application/octet-stream')
+  const archive = new Uint8Array(await response.arrayBuffer())
+  if (archive.byteLength > maximumSize) throw new Error(`downloaded archive ${asset.name} exceeds its size limit`)
+  if (archive.byteLength !== asset.size) {
+    throw new Error(`archive size mismatch for ${asset.name}: expected ${asset.size}, received ${archive.byteLength}`)
+  }
+  const actual = createHash('sha256').update(archive).digest('hex')
+  if (actual !== expectedSha256.toLowerCase()) {
+    throw new Error(`archive checksum mismatch for ${asset.name}: expected ${expectedSha256}, received ${actual}`)
+  }
+  return archive
+}
+
+async function prepareArchivePackages(
+  tempRoot: string,
+  key: string,
+  asset: ReleaseAsset,
+  expectedSha256: string,
+  maximumSize: number,
+  packages: Array<Omit<PreparedPackage, 'sourcePath' | 'version'> & { version?: string }>,
+  signal: AbortSignal,
+): Promise<PreparedPackage[]> {
+  const archive = await downloadVerifiedArchive(asset, expectedSha256, maximumSize, signal)
+  const archivePath = join(tempRoot, `${key}-${basename(asset.name)}`)
+  await writeFile(archivePath, archive)
+  const extractedPath = join(tempRoot, `extracted-${key}`)
+  await mkdir(extractedPath)
+  await extract(archivePath, { dir: extractedPath })
+
+  const prepared: PreparedPackage[] = []
+  for (const expected of packages) {
+    const sourcePath = join(extractedPath, expected.folderName)
+    const manifest = await readManifest(join(sourcePath, 'manifest.json'))
+    if (manifest?.UniqueID !== expected.uniqueId || manifest.Version === undefined) {
+      throw new Error(`${asset.name} does not contain a valid ${expected.name} package`)
+    }
+    if (expected.version !== undefined && compareStableVersions(manifest.Version, expected.version) !== 0) {
+      throw new Error(`${expected.name} version mismatch: expected ${expected.version}, received ${manifest.Version}`)
+    }
+    prepared.push({ ...expected, version: manifest.Version, sourcePath })
+  }
+  return prepared
+}
+
+async function applyPreparedPackage(
+  modsPath: string,
+  prepared: PreparedPackage,
+  timestamp: string,
+): Promise<AppliedPackage> {
+  const installed = await findInstalledMod(modsPath, prepared.uniqueId)
+  const comparison = installed === undefined ? undefined : compareStableVersions(installed.version, prepared.version)
+  if (installed !== undefined && comparison !== undefined && comparison >= 0) {
+    return {
+      name: prepared.name,
+      uniqueId: prepared.uniqueId,
+      version: installed.version,
+      destination: installed.path,
+      action: 'kept',
+    }
+  }
+
+  const destination = installed?.path ?? join(modsPath, prepared.folderName)
+  safeChild(modsPath, destination)
+  let backupPath: string | undefined
+  if (await exists(destination)) {
+    backupPath = join(modsPath, `${basename(destination)}.backup-${timestamp}`)
+    safeChild(modsPath, backupPath)
+    await rename(destination, backupPath)
+  }
+
+  try {
+    await cp(prepared.sourcePath, destination, { recursive: true, errorOnExist: true })
+    if (prepared.preserveConfig === true && backupPath !== undefined) {
+      await preserveStardewConfig(backupPath, destination)
+    }
+    const installedManifest = await readManifest(join(destination, 'manifest.json'))
+    if (installedManifest?.UniqueID !== prepared.uniqueId || installedManifest.Version !== prepared.version) {
+      throw new Error(`${prepared.name} failed manifest verification after installation`)
+    }
+  } catch (error) {
+    await rm(destination, { recursive: true, force: true })
+    if (backupPath !== undefined && await exists(backupPath)) await rename(backupPath, destination)
+    throw error
+  }
+
+  return {
+    name: prepared.name,
+    uniqueId: prepared.uniqueId,
+    version: prepared.version,
+    destination,
+    action: installed === undefined ? 'installed' : 'updated',
+    ...(backupPath === undefined ? {} : { backupPath }),
+  }
+}
+
+async function rollbackAppliedPackages(applied: AppliedPackage[]): Promise<void> {
+  for (const item of [...applied].reverse()) {
+    if (item.action === 'kept') continue
+    await rm(item.destination, { recursive: true, force: true })
+    if (item.backupPath !== undefined && await exists(item.backupPath)) {
+      await rename(item.backupPath, item.destination)
+    }
+  }
+}
+
 export async function installStardewMod(
   gamePath: string | undefined,
   signal: AbortSignal,
@@ -364,66 +678,76 @@ export async function installStardewMod(
   }
 
   const release = await latestRelease(signal)
-  const zipAsset = release.archive
-  if (zipAsset.size > MAX_ARCHIVE_SIZE) throw new Error('refusing MOD archive larger than 50 MiB')
-
   const tempRoot = await mkdtemp(join(tmpdir(), 'dsh-xiaotangyuan-game-'))
   try {
-    const archivePath = join(tempRoot, basename(zipAsset.name))
-    const archive = new Uint8Array(await (await fetchChecked(zipAsset.url, signal, 'application/octet-stream')).arrayBuffer())
-    if (archive.byteLength > MAX_ARCHIVE_SIZE) throw new Error('downloaded MOD archive exceeds 50 MiB')
     let expected = release.expectedSha256
     if (expected === undefined) {
       if (release.checksumAsset === undefined) throw new Error('星露谷发布信息缺少 SHA-256 校验值')
       const checksumText = await (await fetchChecked(release.checksumAsset.url, signal, 'application/octet-stream')).text()
-      expected = checksumLine(checksumText, zipAsset.name)
-      if (expected === undefined) throw new Error(`SHA256SUMS.txt has no entry for ${zipAsset.name}`)
+      expected = checksumLine(checksumText, release.archive.name)
+      if (expected === undefined) throw new Error(`SHA256SUMS.txt has no entry for ${release.archive.name}`)
     }
-    const actual = createHash('sha256').update(archive).digest('hex')
-    if (actual !== expected) throw new Error(`MOD checksum mismatch: expected ${expected}, received ${actual}`)
-    await writeFile(archivePath, archive)
-
-    const extractedPath = join(tempRoot, 'extracted')
-    await mkdir(extractedPath)
-    await extract(archivePath, { dir: extractedPath })
-    const sourcePath = join(extractedPath, MOD_FOLDER_NAME)
-    const sourceManifest = await readManifest(join(sourcePath, 'manifest.json'))
-    if (sourceManifest?.UniqueID !== 'qimidandapigu.StardewAgent' || sourceManifest.Version === undefined) {
-      throw new Error('downloaded archive does not contain a valid Stardew Agent Mod')
+    const firstParty = await prepareArchivePackages(
+      tempRoot,
+      'xiaotangyuan',
+      release.archive,
+      expected,
+      MAX_ARCHIVE_SIZE,
+      [
+        {
+          name: 'XiaoTangYuan Companion Pack',
+          uniqueId: COMPANION_UNIQUE_ID,
+          folderName: COMPANION_FOLDER_NAME,
+          version: release.tagName.slice(STARDEW_RELEASE_PREFIX.length),
+        },
+        {
+          name: 'Stardew Agent Mod',
+          uniqueId: ADAPTER_UNIQUE_ID,
+          folderName: MOD_FOLDER_NAME,
+          version: release.tagName.slice(STARDEW_RELEASE_PREFIX.length),
+          preserveConfig: true,
+        },
+      ],
+      signal,
+    )
+    const dependencies: PreparedPackage[] = []
+    for (const [index, component] of release.components.entries()) {
+      dependencies.push(...await prepareArchivePackages(
+        tempRoot,
+        `component-${index}`,
+        component.archive,
+        component.archive.sha256,
+        MAX_COMPONENT_ARCHIVE_SIZE,
+        [{
+          name: component.name,
+          uniqueId: component.uniqueId,
+          folderName: component.folderName,
+          version: component.version,
+        }],
+        signal,
+      ))
     }
 
     await mkdir(detection.modsPath, { recursive: true })
-    const destination = join(detection.modsPath, MOD_FOLDER_NAME)
-    safeChild(detection.modsPath, destination)
-    let backupPath: string | undefined
-    if (await exists(destination)) {
-      backupPath = join(
-        detection.modsPath,
-        `${MOD_FOLDER_NAME}.backup-${new Date().toISOString().replaceAll(/[:.]/g, '-')}`,
-      )
-      safeChild(detection.modsPath, backupPath)
-      await rename(destination, backupPath)
-    }
-
+    const timestamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
+    const applied: AppliedPackage[] = []
     try {
-      await cp(sourcePath, destination, { recursive: true, errorOnExist: true })
-      if (backupPath !== undefined) await preserveStardewConfig(backupPath, destination)
-      const installed = await readManifest(join(destination, 'manifest.json'))
-      if (installed?.UniqueID !== 'qimidandapigu.StardewAgent') {
-        throw new Error('installed MOD failed manifest verification')
+      for (const prepared of [...dependencies, ...firstParty]) {
+        applied.push(await applyPreparedPackage(detection.modsPath, prepared, timestamp))
       }
     } catch (error) {
-      await rm(destination, { recursive: true, force: true })
-      if (backupPath !== undefined && await exists(backupPath)) await rename(backupPath, destination)
+      await rollbackAppliedPackages(applied)
       throw error
     }
 
+    const adapter = applied.find(item => item.uniqueId === ADAPTER_UNIQUE_ID)!
     return {
       installed: true,
-      version: sourceManifest.Version,
+      version: adapter.version,
       gamePath: detection.gamePath,
-      modPath: destination,
-      ...(backupPath === undefined ? {} : { backupPath }),
+      modPath: adapter.destination,
+      ...(adapter.backupPath === undefined ? {} : { backupPath: adapter.backupPath }),
+      components: applied.map(item => `${item.name} ${item.version} (${item.action})`).join(', '),
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
