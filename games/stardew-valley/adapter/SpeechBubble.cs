@@ -9,14 +9,34 @@ namespace StardewAgentMod;
 internal sealed class SpeechBubble
 {
     private const long DurationMilliseconds = 6500;
-    private readonly CompanionLocator companion = new();
+    private readonly Func<Vector2?> anchorProvider;
     private string? text;
     private long startedAt;
+    private bool persistent;
+
+    public SpeechBubble(Func<Vector2?> anchorProvider)
+    {
+        this.anchorProvider = anchorProvider;
+    }
 
     public void Show(string nextText)
     {
         this.text = nextText;
         this.startedAt = (Game1.currentGameTime?.TotalGameTime.Ticks ?? 0) / 10000;
+        this.persistent = false;
+    }
+
+    public void ShowStatus(string nextText)
+    {
+        this.text = nextText;
+        this.startedAt = (Game1.currentGameTime?.TotalGameTime.Ticks ?? 0) / 10000;
+        this.persistent = true;
+    }
+
+    public void Clear()
+    {
+        this.text = null;
+        this.persistent = false;
     }
 
     public void Draw(SpriteBatch batch, int yOffset)
@@ -24,14 +44,14 @@ internal sealed class SpeechBubble
         if (string.IsNullOrWhiteSpace(this.text) || Game1.player is null) return;
         long now = (Game1.currentGameTime?.TotalGameTime.Ticks ?? 0) / 10000;
         long elapsed = now - this.startedAt;
-        if (elapsed >= DurationMilliseconds)
+        if (!this.persistent && elapsed >= DurationMilliseconds)
         {
             this.text = null;
             return;
         }
 
         float alpha = elapsed < 250 ? elapsed / 250f
-            : elapsed > DurationMilliseconds - 600
+            : !this.persistent && elapsed > DurationMilliseconds - 600
                 ? (DurationMilliseconds - elapsed) / 600f
                 : 1f;
         alpha = Math.Clamp(alpha, 0f, 1f);
@@ -40,7 +60,7 @@ internal sealed class SpeechBubble
         int maxWidth = Math.Max(220, (int)(Game1.viewport.Width * 0.36));
         string wrapped = Game1.parseText(this.text, font, maxWidth);
         Vector2 size = font.MeasureString(wrapped);
-        Vector2 world = this.companion.TryGetWorldPosition()
+        Vector2 world = this.anchorProvider()
             ?? new Vector2(Game1.player.Position.X + 72, Game1.player.Position.Y - 32);
         Vector2 anchor = Game1.GlobalToLocal(Game1.viewport, world);
 

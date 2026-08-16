@@ -1,8 +1,8 @@
 {
   "Name": "XiaoTangYuan Game AI - Stardew Valley",
   "Author": "qimidandapigu",
-  "Version": "0.3.0",
-  "Description": "Thin Stardew Valley adapter for XiaoTangYuan voice, vision, structured state, and in-game presentation through DeepSeek Harness.",
+  "Version": "0.4.0",
+  "Description": "Thin Stardew Valley adapter with a bundled XiaoTangYuan companion, voice feedback, structured state, and DeepSeek Harness integration.",
   "UniqueID": "qimidandapigu.StardewAgent",
   "EntryDll": "StardewAgentMod.dll",
   "MinimumApiVersion": "4.0.0",

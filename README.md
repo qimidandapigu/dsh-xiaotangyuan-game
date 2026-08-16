@@ -53,7 +53,7 @@ dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-
 小汤圆，帮我检测并安装星露谷物语的 AI MOD
 ```
 
-插件会调用 `game_mod_detect` 和 `game_mod_install`，检测 Steam、星露谷与 SMAPI，下载 `stardew-v0.3.0` 安装包，校验 SHA-256，备份旧版本并安装到游戏的 `Mods/StardewAgentMod` 目录。游戏适配器没有内置在插件包里，而是由插件在收到安装请求后从同一仓库的独立 Release 下载。
+插件会调用 `game_mod_detect` 和 `game_mod_install`，检测 Steam、星露谷与 SMAPI，下载最新的 `stardew-v*` 安装包，校验 SHA-256，备份旧版本并安装到游戏的 `Mods/StardewAgentMod` 目录。游戏适配器没有内置在插件包里，而是由插件在收到安装请求后从同一仓库的独立 Release 下载。宠物素材随游戏适配器一起安装，不需要额外安装 Content Patcher 或第三方宠物 MOD。
 
 如果已经安装过旧的 `@qimidandapigu/dsh-game-agent`，请先移除它，避免两个 Gateway 同时占用 `32145` 端口。
 
@@ -70,7 +70,7 @@ pnpm pack:plugin
 
 ## 当前状态
 
-`0.4.0` 已实现 Harness Gateway、结构化星露谷状态、多模态模型自动选择、DSH 凭据驱动的语音 Provider，以及随插件分发的 Windows 麦克风与音频播放 Host。日记、主动对话、关系任务和完整游戏动作仍在后续迁移范围内。
+Harness 插件 `0.4.0` 已实现 Gateway、结构化星露谷状态、多模态模型自动选择、DSH 凭据驱动的语音 Provider，以及随插件分发的 Windows 麦克风与音频播放 Host。星露谷适配器 `0.4.0` 内置小汤圆宠物形象和录音/思考气泡反馈。日记、主动对话、关系任务和完整游戏动作仍在后续迁移范围内。
 
 ## 许可证
 

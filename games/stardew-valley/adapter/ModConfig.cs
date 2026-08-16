@@ -9,4 +9,8 @@ internal sealed class ModConfig
     public SButton TextChatKey { get; set; } = SButton.T;
 
     public int BubbleYOffset { get; set; } = 220;
+
+    public bool ShowCompanion { get; set; } = true;
+
+    public float CompanionScale { get; set; } = 2f;
 }
