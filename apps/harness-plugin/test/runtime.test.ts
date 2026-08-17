@@ -10,9 +10,19 @@ describe('game runtime configuration', () => {
     expect(config.vision.maxWidth).toBe(1280)
     expect(config.speech.enabled).toBe(true)
     expect(config.speech.provider).toBe('auto')
+    expect(config.speech.recognitionProvider).toBe('auto')
+    expect(config.speech.synthesisProvider).toBe('auto')
     expect(config.speech.credentialRef).toBe('VOLCENGINE_API_KEY')
     expect(config.media.pushToTalkVirtualKey).toBe(0x77)
     expect(JSON.stringify(config)).not.toContain('apiKey')
+  })
+
+  it('allows recognition and synthesis capabilities to select different implementations', () => {
+    const config = resolveConfig({
+      speech: { recognitionProvider: 'local-asr', synthesisProvider: 'cloud-tts' },
+    })
+    expect(config.speech.recognitionProvider).toBe('local-asr')
+    expect(config.speech.synthesisProvider).toBe('cloud-tts')
   })
 
   it('rejects an unsafe screenshot width', () => {

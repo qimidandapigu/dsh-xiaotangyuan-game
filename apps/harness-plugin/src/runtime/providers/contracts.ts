@@ -1,3 +1,5 @@
+import type { CapabilityProvider } from '../capabilities.js'
+
 export interface BinaryAsset {
   bytes: Uint8Array
   mediaType: string
@@ -8,13 +10,11 @@ export interface MultimodalRequest {
   images: readonly BinaryAsset[]
 }
 
-export interface MultimodalProvider {
-  readonly id: string
+export interface MultimodalProvider extends CapabilityProvider {
   analyze(request: MultimodalRequest, signal: AbortSignal): Promise<string>
 }
 
-export interface SpeechRecognitionProvider {
-  readonly id: string
+export interface SpeechRecognitionProvider extends CapabilityProvider {
   transcribe(audio: BinaryAsset, signal: AbortSignal): Promise<string>
 }
 
@@ -23,14 +23,11 @@ export interface SpeechSynthesisRequest {
   voice?: string
 }
 
-export interface SpeechSynthesisProvider {
-  readonly id: string
+export interface SpeechSynthesisProvider extends CapabilityProvider {
   synthesize(request: SpeechSynthesisRequest, signal: AbortSignal): Promise<BinaryAsset>
 }
 
-export interface SpeechCapabilityProvider extends SpeechRecognitionProvider, SpeechSynthesisProvider {
-  isAvailable(): Promise<boolean>
-}
+export interface SpeechCapabilityProvider extends SpeechRecognitionProvider, SpeechSynthesisProvider {}
 
 export interface HostMediaService {
   captureMicrophone(signal: AbortSignal): Promise<BinaryAsset>

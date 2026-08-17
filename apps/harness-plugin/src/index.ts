@@ -8,6 +8,7 @@ import { GameGateway } from './gateway/game-gateway.js'
 import { WindowsMediaHost } from './runtime/media/windows-media-host.js'
 import { MultimodalRouter } from './runtime/multimodal/multimodal-router.js'
 import { SignedFeedbackClient } from './runtime/feedback/signed-feedback-client.js'
+import { CapabilityRegistry } from './runtime/capabilities.js'
 import { SpeechController } from './runtime/speech/speech-controller.js'
 import { VolcengineSpeechProvider } from './runtime/speech/volcengine-speech-provider.js'
 import { registerGameTools } from './tools/game-mod-tools.js'
@@ -36,8 +37,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         await speech.speak(text, signal)
       },
     )
-    const speechProviders = [new VolcengineSpeechProvider(ctx, resolved.speech)]
-    speech = new SpeechController(ctx, resolved.speech, media, gateway, speechProviders)
+    const capabilities = new CapabilityRegistry()
+    const speechProvider = new VolcengineSpeechProvider(ctx, resolved.speech)
+    capabilities.register('speech.transcribe', speechProvider)
+    capabilities.register('speech.synthesize', speechProvider)
+    speech = new SpeechController(ctx, resolved.speech, media, gateway, capabilities)
     void speech.start().catch(error => {
       ctx.logger.warn('xiaotangyuan-game: 语音运行时启动失败')
       ctx.logger.warn(error)
@@ -53,7 +57,8 @@ export type { Config } from './config.js'
 export type { FeedbackReceipt, FeedbackReport, FeedbackSubmission } from './runtime/feedback/contracts.js'
 export type { AdapterHello, GameChatContext, GameChatRequest } from './protocol/game.js'
 export type { RpcFailure, RpcRequest, RpcSuccess } from './protocol/json-rpc.js'
-export { REQUIRED_ENGINE_CAPABILITIES, missingRequiredCapabilities } from './runtime/capabilities.js'
+export { CapabilityRegistry, REQUIRED_ENGINE_CAPABILITIES, missingRequiredCapabilities } from './runtime/capabilities.js'
+export type { CapabilityProvider, CapabilityStatus, RequiredEngineCapability } from './runtime/capabilities.js'
 export type {
   BinaryAsset,
   HostMediaService,

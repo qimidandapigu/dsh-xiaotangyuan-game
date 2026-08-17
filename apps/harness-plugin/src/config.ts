@@ -7,7 +7,10 @@ export interface VisionConfig {
 
 export interface SpeechConfig {
   enabled?: boolean
+  /** Compatibility shortcut that selects the same implementation for ASR and TTS. */
   provider?: string
+  recognitionProvider?: string
+  synthesisProvider?: string
   credentialRef?: string
   asrResourceId?: string
   ttsResourceId?: string
@@ -57,6 +60,8 @@ export interface ResolvedConfig {
   speech: {
     enabled: boolean
     provider: string
+    recognitionProvider: string
+    synthesisProvider: string
     credentialRef: string
     asrResourceId: string
     ttsResourceId: string
@@ -161,6 +166,8 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
     speech: {
       enabled: config.speech?.enabled ?? true,
       provider: config.speech?.provider ?? 'auto',
+      recognitionProvider: config.speech?.recognitionProvider ?? config.speech?.provider ?? 'auto',
+      synthesisProvider: config.speech?.synthesisProvider ?? config.speech?.provider ?? 'auto',
       credentialRef: config.speech?.credentialRef ?? 'VOLCENGINE_API_KEY',
       asrResourceId: config.speech?.asrResourceId ?? 'volc.bigasr.auc',
       ttsResourceId: config.speech?.ttsResourceId ?? 'seed-tts-1.0',

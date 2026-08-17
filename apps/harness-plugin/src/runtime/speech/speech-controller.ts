@@ -1,8 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ResolvedConfig } from '../../config.js'
+import { CapabilityRegistry } from '../capabilities.js'
 import type { MediaHostEvent } from '../media/windows-media-host.js'
 import { WindowsMediaHost } from '../media/windows-media-host.js'
-import type { SpeechCapabilityProvider } from '../providers/contracts.js'
+import type { SpeechRecognitionProvider, SpeechSynthesisProvider } from '../providers/contracts.js'
 
 export interface VoiceInteractionHandler {
   recordingStarted(processId: number): void
@@ -21,26 +22,33 @@ export class SpeechController {
     private readonly config: ResolvedConfig['speech'],
     private readonly media: WindowsMediaHost,
     private readonly handler: VoiceInteractionHandler,
-    private readonly providers: readonly SpeechCapabilityProvider[],
+    private readonly capabilities: CapabilityRegistry,
   ) {}
 
   async start(): Promise<void> {
     if (!this.config.enabled) return
-    if (await this.selectProvider() === undefined) {
-      this.ctx.logger.warn('xiaotangyuan-game: 当前没有已配置的语音 Provider')
-    }
+    const [recognition, synthesis] = await Promise.all([
+      this.selectRecognitionProvider(),
+      this.selectSynthesisProvider(),
+    ])
+    if (recognition === undefined) this.ctx.logger.warn('xiaotangyuan-game: 当前没有已配置的语音识别能力')
+    if (synthesis === undefined) this.ctx.logger.warn('xiaotangyuan-game: 当前没有已配置的语音合成能力')
     this.disposeListener = this.media.onEvent(event => this.onMediaEvent(event))
     if (await this.media.start()) this.media.configure(this.targets)
   }
 
-  private async selectProvider(): Promise<SpeechCapabilityProvider | undefined> {
-    const candidates = this.config.provider === 'auto'
-      ? this.providers
-      : this.providers.filter(provider => provider.id === this.config.provider)
-    for (const provider of candidates) {
-      if (await provider.isAvailable()) return provider
-    }
-    return undefined
+  private async selectRecognitionProvider(): Promise<SpeechRecognitionProvider | undefined> {
+    return await this.capabilities.resolve<SpeechRecognitionProvider>(
+      'speech.transcribe',
+      this.config.recognitionProvider,
+    )
+  }
+
+  private async selectSynthesisProvider(): Promise<SpeechSynthesisProvider | undefined> {
+    return await this.capabilities.resolve<SpeechSynthesisProvider>(
+      'speech.synthesize',
+      this.config.synthesisProvider,
+    )
   }
 
   updateTargets(processIds: readonly number[]): void {
@@ -49,7 +57,7 @@ export class SpeechController {
   }
 
   async speak(text: string, signal: AbortSignal): Promise<void> {
-    const provider = await this.selectProvider()
+    const provider = await this.selectSynthesisProvider()
     if (provider === undefined) throw new Error('没有可用的语音合成 Provider，请先在 DSH 中绑定相应凭据')
     const audio = await provider.synthesize({ text }, signal)
     this.media.play(audio)
@@ -70,8 +78,8 @@ export class SpeechController {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(new Error('语音交互超时')), 120_000)
     try {
-      const provider = await this.selectProvider()
-      if (provider === undefined) throw new Error('没有可用的语音识别与合成 Provider，请先在 DSH 中绑定相应凭据')
+      const provider = await this.selectRecognitionProvider()
+      if (provider === undefined) throw new Error('没有可用的语音识别能力，请先在 DSH 中绑定相应凭据')
       const transcript = await provider.transcribe({
         bytes: new Uint8Array(Buffer.from(event.audioBase64, 'base64')),
         mediaType: event.mediaType,
