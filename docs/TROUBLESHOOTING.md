@@ -49,6 +49,8 @@ XiaoTangYuan Companion 0.5.0
 6. `media.enabled` 与 `speech.enabled` 没有关闭。
 7. `media.pushToTalkVirtualKey` 与实际按键一致：`F8=119`、`Q=81`、`V=86`。源码默认是 F8，一个 Harness profile 当前只能配置一个全局语音键。
 
+如果松开按键后仍长期显示“正在听”，先确认 Harness 的 `3080` 与 Gateway 的 `32145` 仍在监听。`0.7.1` 起松键会立即切换为“正在思考”，并在 30 秒后强制停止异常录音；旧版本在 ASR 返回前会错误地保留“正在听”状态。
+
 只读检查命令：
 
 ```powershell
@@ -149,7 +151,7 @@ Get-NetTCPConnection -State Established -LocalPort 32145 -ErrorAction SilentlyCo
 
 正常状态应同时满足：
 
-- Harness 插件 `0.6.2` 和 ONI Adapter `0.1.3` 已安装；
+- Harness 插件 `0.7.1` 和 ONI Adapter `0.1.4` 已安装；
 - `XtyMediaHost.exe` 正在运行；
 - 缺氧窗口位于前台；
 - `32145` 除监听外还有一个来自 ONI Adapter 的已建立连接；
@@ -171,7 +173,7 @@ ONI Adapter `0.1.3` 修复了 Windows 桥目录丢失反斜杠、旧 PID 被错�
 
 ## 缺氧语音回复仍然慢
 
-Harness `0.6.2` 只调用一次支持图片输入的 Agent：输入数组包含玩家文字与当前游戏窗口截图，模型直接回答。它不再先生成视觉描述、再调用第二个对话模型，也不把结构化 observation 拼进当前提示词。仍有延迟时，分别观察 ASR、模型首字和 TTS；不要把一次图片模型调用误判成“思考模式”。
+Harness `0.7.1` 只调用一次支持图片输入的 Agent，并启用 PCM 流式 ASR、真实正文 token 增量和流式 TTS 播放。日志中的 `firstTextMs` 是游戏首次看见正文的时间；语音日志分别记录 ASR、Agent、TTS。若出现“流式语音识别失败，自动降级”，请确认账号已开通 `volc.bigasr.sauc.duration`；未开通时会先尝试 `volc.bigasr.auc_turbo`，最后才回到标准 submit/query。
 
 ## 自动反馈没有生成 Issue
 

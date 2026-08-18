@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using DoubaoAI.ONI.Assets;
 using DoubaoAI.ONI.Commands;
@@ -15,7 +16,6 @@ namespace DoubaoAI.ONI
         private OniHarnessBridge _bridge;
         private Texture2D _sprite;
         private Texture2D _fallbackSprite;
-        private Texture2D _halo;
         private Font _font;
         private GUIStyle _bodyStyle;
         private GUIStyle _inputStyle;
@@ -30,8 +30,13 @@ namespace DoubaoAI.ONI
         private float _bubbleUntil;
         private float _nextDangerScanAt;
         private float _lastDangerAlertAt;
-        private float _nextAutoChatAt;
         private string _lastDangerSignature;
+        private MinionIdentity _followedMinion;
+        private MinionIdentity _facingMinion;
+        private Vector3 _lastFacingPosition;
+        private float _nextFacingSampleAt;
+        private float _lastFairyMovementAt;
+        private int _facingFrame;
 
         private void Awake()
         {
@@ -43,11 +48,9 @@ namespace DoubaoAI.ONI
             string assets = Path.Combine(ModPaths.ContentPath, "assets");
             _sprite = TextureLoader.LoadPng(Path.Combine(assets, "doubao_companion.png"));
             _fallbackSprite = TextureLoader.LoadPng(Path.Combine(assets, "doubao_t.png"));
-            _halo = TextureLoader.CreateHalo(96);
             try { _font = Font.CreateDynamicFontFromOSFont("Microsoft YaHei UI", 18); } catch { _font = null; }
             _panelRect = new Rect(Mathf.Max(20, Screen.width - 540), 110, 500, 500);
             _bubbleUntil = Time.unscaledTime + 8f;
-            ScheduleNextAutoChat();
         }
 
         private void Update()
@@ -72,18 +75,156 @@ namespace DoubaoAI.ONI
                     _bridge.Compose(danger.Prompt, snapshot, command);
                 }
             }
-            if (!_busy && !_panelOpen && config.AutoChatEnabled && Time.unscaledTime >= _nextAutoChatAt)
-            {
-                ScheduleNextAutoChat();
-                _busy = true;
-                _status = "精灵正在观察殖民地…";
-                _bridge.Compose("玩家已经一段时间没说话了。结合当前殖民地状态说一句简短、自然、有用的话；没有要紧事就随口聊聊。", snapshot, command);
-            }
             if (_panelOpen && Input.GetKeyDown(KeyCode.Escape)) _panelOpen = false;
+        }
+
+        private MinionIdentity ResolveFollowedMinion()
+        {
+            if (IsLiveMinion(_followedMinion)) return _followedMinion;
+
+            string rememberedName = ConfigManager.Current.FairyFollowDuplicantName.Trim();
+            var candidates = new List<MinionIdentity>();
+            foreach (MinionIdentity minion in Components.LiveMinionIdentities.Items)
+            {
+                if (!IsLiveMinion(minion)) continue;
+                if (rememberedName.Length > 0
+                    && string.Equals(SafeMinionName(minion), rememberedName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _followedMinion = minion;
+                    return _followedMinion;
+                }
+                candidates.Add(minion);
+            }
+
+            if (candidates.Count == 0) return null;
+            _followedMinion = candidates[UnityEngine.Random.Range(0, candidates.Count)];
+            RememberFollowedMinion(_followedMinion);
+            return _followedMinion;
+        }
+
+        private static string SafeMinionName(MinionIdentity minion)
+        {
+            try { return (minion.GetProperName() ?? minion.name ?? "未知").Replace("\r", " ").Replace("\n", " ").Trim(); }
+            catch { return minion == null ? "未知" : minion.name; }
+        }
+
+        private void RememberFollowedMinion(MinionIdentity minion)
+        {
+            string name = SafeMinionName(minion);
+            if (string.Equals(ConfigManager.Current.FairyFollowDuplicantName, name, StringComparison.Ordinal)) return;
+            ConfigManager.Current.FairyFollowDuplicantName = name;
+            ConfigManager.Save();
+        }
+
+        private PlayerCommandExecutionResult ChangeFollowedMinion(int actorId)
+        {
+            foreach (MinionIdentity minion in Components.LiveMinionIdentities.Items)
+            {
+                if (IsLiveMinion(minion) && PlayerCommandContextCollector.GetId(minion) == actorId)
+                {
+                    _followedMinion = minion;
+                    RememberFollowedMinion(minion);
+                    string name = SafeMinionName(minion);
+                    _reply = "好吧，以后我就跟着" + name + "。";
+                    _bubbleUntil = Time.unscaledTime + 8f;
+                    return new PlayerCommandExecutionResult { Success = true, Reply = "小汤圆已改为跟随" + name + "。" };
+                }
+            }
+            return new PlayerCommandExecutionResult { Success = false, Reply = "没有找到指定的存活复制人。" };
+        }
+
+        private static bool IsLiveMinion(MinionIdentity candidate)
+        {
+            if (candidate == null || candidate.gameObject == null) return false;
+            foreach (MinionIdentity minion in Components.LiveMinionIdentities.Items)
+            {
+                if (minion == candidate) return true;
+            }
+            return false;
+        }
+
+        private bool TryGetFairyAnchor(out Rect anchor)
+        {
+            anchor = new Rect();
+            MinionIdentity minion = ResolveFollowedMinion();
+            CameraController controller = CameraController.Instance;
+            Camera camera = controller == null ? null : controller.baseCamera;
+            if (minion == null || camera == null) return false;
+
+            Vector3 screen = camera.WorldToScreenPoint(minion.transform.position);
+            Vector3 oneCellUp = camera.WorldToScreenPoint(minion.transform.position + Vector3.up);
+            const float offscreenMargin = 96f;
+            if (screen.z <= 0f
+                || screen.x < -offscreenMargin
+                || screen.x > Screen.width + offscreenMargin
+                || screen.y < -offscreenMargin
+                || screen.y > Screen.height + offscreenMargin)
+            {
+                return false;
+            }
+
+            ModConfig config = ConfigManager.Current;
+            // Keep the fairy at a stable size in the game world. A fixed pixel size
+            // makes it look larger when the camera zooms out and smaller when it zooms in.
+            float spriteSize = Mathf.Clamp(Mathf.Abs(oneCellUp.y - screen.y) * 0.8f, 28f, 84f);
+            float scale = spriteSize / 72f;
+            float idleSway = Mathf.Sin(Time.unscaledTime * 1.25f + 0.8f) * 2.5f * scale;
+            float idleBob = Mathf.Sin(Time.unscaledTime * 2.1f) * 5f * scale;
+            float x = screen.x + config.FairyFollowOffsetX * scale + idleSway;
+            float y = Screen.height - screen.y - spriteSize - config.FairyFollowOffsetY * scale + idleBob;
+            anchor = new Rect(
+                Mathf.Clamp(x, 8f, Mathf.Max(8f, Screen.width - spriteSize - 8f)),
+                Mathf.Clamp(y, 8f, Mathf.Max(8f, Screen.height - spriteSize - 8f)),
+                spriteSize,
+                spriteSize);
+            UpdateFairyFacing(minion);
+            return true;
+        }
+
+        private void UpdateFairyFacing(MinionIdentity minion)
+        {
+            if (_facingMinion != minion)
+            {
+                _facingMinion = minion;
+                _lastFacingPosition = minion.transform.position;
+                _nextFacingSampleAt = Time.unscaledTime + 0.1f;
+                _lastFairyMovementAt = Time.unscaledTime;
+                _facingFrame = 0;
+                return;
+            }
+
+            if (Time.unscaledTime < _nextFacingSampleAt) return;
+            _nextFacingSampleAt = Time.unscaledTime + 0.1f;
+
+            Vector3 position = minion.transform.position;
+            Vector3 movement = position - _lastFacingPosition;
+            _lastFacingPosition = position;
+            if (Mathf.Abs(movement.x) < 0.025f && Mathf.Abs(movement.y) < 0.025f)
+            {
+                if (Time.unscaledTime - _lastFairyMovementAt >= 0.2f) _facingFrame = 0;
+                return;
+            }
+
+            _lastFairyMovementAt = Time.unscaledTime;
+
+            if (Mathf.Abs(movement.x) >= Mathf.Abs(movement.y))
+            {
+                // Sprite strip order: front, right, back, left.
+                _facingFrame = movement.x > 0f ? 1 : 3;
+            }
+            else
+            {
+                // Vertical travel means the duplicant is climbing, so both
+                // directions show the companion's back.
+                _facingFrame = 2;
+            }
         }
 
         private PlayerCommandExecutionResult ExecuteHarnessTool(string name, JObject args)
         {
+            if (name == "oni_companion_follow")
+                return ChangeFollowedMinion((int?)args["actorId"] ?? -1);
+
             var plan = new PlayerCommandPlan
             {
                 Mode = "command",
@@ -105,6 +246,12 @@ namespace DoubaoAI.ONI
         {
             if (method == "gateway.ready") { _status = "AIHarness 已连接"; return; }
             if (method == "assistant.status") { _status = text == "recording" ? "正在听你说话…" : "AIHarness 正在思考…"; return; }
+            if (method == "assistant.delta" || method == "assistant.text.delta")
+            {
+                if (!string.IsNullOrWhiteSpace(text)) _reply = text;
+                _status = "小汤圆正在回答…";
+                _bubbleUntil = Time.unscaledTime + 12f; return;
+            }
             if (method == "assistant.present")
             {
                 _busy = false; _status = "回答完成";
@@ -122,13 +269,9 @@ namespace DoubaoAI.ONI
         private void OnGUI()
         {
             EnsureStyles();
-            ModConfig config = ConfigManager.Current;
-            float right = Mathf.Clamp(config.FairyRightOffset, 0, Mathf.Max(0, Screen.width - 80));
-            float top = Mathf.Clamp(config.FairyTopOffset, 16, Mathf.Max(16, Screen.height - 100));
-            Rect anchor = new Rect(Screen.width - right - 72, top, 72, 72);
-            if (_halo != null) GUI.DrawTexture(new Rect(anchor.x - 12, anchor.y - 12, 96, 96), _halo, ScaleMode.ScaleToFit, true);
+            bool hasAnchor = TryGetFairyAnchor(out Rect anchor);
             Texture2D shown = _sprite != null ? _sprite : _fallbackSprite;
-            if (shown != null)
+            if (hasAnchor && shown != null)
             {
                 int frameCount = shown.height > 0 && shown.width >= shown.height * 2
                     ? Mathf.Max(1, shown.width / shown.height)
@@ -136,13 +279,13 @@ namespace DoubaoAI.ONI
                 if (frameCount == 1) GUI.DrawTexture(anchor, shown, ScaleMode.ScaleToFit, true);
                 else
                 {
-                    int frame = Mathf.FloorToInt(Time.unscaledTime * 3f) % frameCount;
                     float frameWidth = 1f / frameCount;
+                    int frame = Mathf.Clamp(_facingFrame, 0, frameCount - 1);
                     GUI.DrawTextureWithTexCoords(anchor, shown, new Rect(frame * frameWidth, 0f, frameWidth, 1f), true);
                 }
             }
-            if (GUI.Button(anchor, GUIContent.none, GUIStyle.none)) _panelOpen = !_panelOpen;
-            if (!_panelOpen && Time.unscaledTime < _bubbleUntil && !string.IsNullOrWhiteSpace(_reply))
+            if (hasAnchor && GUI.Button(anchor, GUIContent.none, GUIStyle.none)) _panelOpen = !_panelOpen;
+            if (hasAnchor && !_panelOpen && Time.unscaledTime < _bubbleUntil && !string.IsNullOrWhiteSpace(_reply))
             {
                 Rect bubble = new Rect(Mathf.Max(20, anchor.x - 340), anchor.y + 5, 320, 90);
                 GUI.Box(bubble, GUIContent.none);
@@ -164,7 +307,7 @@ namespace DoubaoAI.ONI
             if (send && !_busy && !string.IsNullOrWhiteSpace(_input))
             {
                 string text = _input.Trim(); _input = string.Empty; _busy = true;
-                _status = "正在交给 AIHarness 思考…"; ScheduleNextAutoChat();
+                _status = "正在交给 AIHarness 思考…";
                 _bridge.SendChat(text, SafeCollectSnapshot(), SafeCollectCommandSnapshot());
             }
             GUI.DragWindow(new Rect(0, 0, 500, 36));
@@ -182,8 +325,6 @@ namespace DoubaoAI.ONI
             catch { return new PlayerCommandSnapshot(); }
         }
 
-        private void ScheduleNextAutoChat() { _nextAutoChatAt = Time.unscaledTime + ConfigManager.Current.AutoChatIntervalSeconds; }
-
         private void EnsureStyles()
         {
             if (_bodyStyle != null) return;
@@ -200,7 +341,6 @@ namespace DoubaoAI.ONI
             if (_bridge != null) _bridge.Dispose();
             if (_sprite != null) Destroy(_sprite);
             if (_fallbackSprite != null) Destroy(_fallbackSprite);
-            if (_halo != null) Destroy(_halo);
             if (_font != null) Destroy(_font);
         }
     }

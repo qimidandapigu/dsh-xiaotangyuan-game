@@ -30,11 +30,18 @@ export function apply(ctx: Context, config: Config = {}): void {
       resolved.host,
       resolved.port,
       multimodal,
+      resolved.proactiveChat,
       processIds => speech?.updateTargets(processIds),
       feedback !== undefined,
       async (text, signal) => {
         if (speech === undefined) throw new Error('语音运行时尚未启动')
         await speech.speak(text, signal)
+      },
+      async (processId, interactionId, delta) => {
+        await speech?.appendSpeechDelta(processId, interactionId, delta)
+      },
+      async (processId, interactionId, finalText) => {
+        return await speech?.finishSpeechReply(processId, interactionId, finalText) ?? false
       },
     )
     const capabilities = new CapabilityRegistry()

@@ -1,6 +1,6 @@
 # @qimidandapigu/dsh-xiaotangyuan-game
 
-运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.6.2`。
+运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.7.1`。
 
 ## 职责
 
@@ -16,7 +16,7 @@
 
 ## 安装
 
-`0.6.2` 是当前源码版本，尚未公开发布。公开稳定版仍为 `0.5.1`；开发测试请先在仓库根目录构建：
+`0.7.1` 是当前源码版本，尚未公开发布。公开稳定版仍为 `0.5.1`；开发测试请先在仓库根目录构建：
 
 ```powershell
 pnpm install
@@ -28,7 +28,7 @@ pnpm pack:plugin
 然后安装生成的本地包：
 
 ```powershell
-dsh plugin --profile web add ".\qimidandapigu-dsh-xiaotangyuan-game-0.6.2.tgz"
+dsh plugin --profile web add ".\qimidandapigu-dsh-xiaotangyuan-game-0.7.1.tgz"
 ```
 
 只有在对应 Release 实际创建后，才应使用新的 GitHub 下载地址。
@@ -52,14 +52,20 @@ Gateway 只允许 `127.0.0.1`、`localhost` 或 `::1`，不会暴露到局域网
 | `vision.enabled` | `true` | 启用游戏截图理解 |
 | `vision.maxWidth` | `1280` | 游戏客户区截图的最大宽度 |
 | `speech.enabled` | `true` | 启用 ASR 与 TTS |
-| `speech.provider` | `auto` | 从已注册语音 Provider 中选择 |
+| `speech.provider` | `auto` | 兼容配置：为 ASR 与 TTS 选择同一个实现 |
+| `speech.recognitionProvider` | `auto` | 单独选择 `speech.transcribe` 实现，优先于 `speech.provider` |
+| `speech.synthesisProvider` | `auto` | 单独选择 `speech.synthesize` 实现，优先于 `speech.provider` |
 | `speech.credentialRef` | `VOLCENGINE_API_KEY` | DSH 凭据名称，不是 Key 内容 |
 | `speech.asrResourceId` | `volc.bigasr.auc` | 当前火山 ASR 资源 |
+| `speech.asrFastResourceId` | `volc.bigasr.auc_turbo` | 流式 ASR 不可用时的单请求极速识别资源 |
+| `speech.asrStreamingResourceId` | `volc.bigasr.sauc.duration` | 实时 PCM 流式识别资源 |
 | `speech.ttsResourceId` | `seed-tts-1.0` | 当前火山 TTS 资源 |
 | `speech.ttsVoice` | 内置中文女声 | TTS 发音人 |
 | `media.enabled` | `true` | 启用 Windows 媒体 Host |
 | `media.pushToTalkVirtualKey` | `119` | Windows Virtual-Key，默认 `F8` |
 | `media.executablePath` | 插件内置路径 | 自定义媒体 Host 路径 |
+| `proactiveChat.enabled` | `true` | 让已连接游戏中的小精灵主动说话 |
+| `proactiveChat.intervalSeconds` | `180` | 玩家没有交互后触发主动聊天的统一间隔 |
 | `installers.dontStarve.manifestUrl` | 官方 v1 清单 | 饥荒安装包发布清单 |
 | `installers.dontStarve.archivePath` | 无 | 仅供本地开发的绝对 ZIP 路径；必须同时配置版本和 SHA-256 |
 
@@ -79,7 +85,9 @@ feedback:
 
 ## Provider 原则
 
-Provider 接口是厂商无关的，但 `0.6.2` 实际注册的语音实现只有 `VolcengineSpeechProvider`。新增厂商时应实现通用 `SpeechCapabilityProvider`，不能修改任何游戏 Adapter。
+运行时按 `vision.observe`、`speech.transcribe`、`speech.synthesize` 等能力注册和选择实现，不把 ASR、TTS 与游戏 Agent 强制绑定到同一家厂商。自动模式会跳过未配置或不可用的实现；高级配置可以让 ASR 与 TTS 分别选择不同 Provider。
+
+Provider 接口是厂商无关的，但 `0.7.1` 实际内置的语音实现只有 `VolcengineSpeechProvider`。新增厂商时只需实现相应能力接口并注册，不能修改任何游戏 Adapter。
 
 所有真实密钥通过 `ctx.credentials.resolve(ref)` 在操作时解析。插件配置只保存凭据引用，不缓存或持久化秘密。
 
@@ -90,12 +98,16 @@ Provider 接口是厂商无关的，但 `0.6.2` 实际注册的语音实现只�
                  ↓
 媒体 Host 只接受前台且已连接的游戏进程，并只截取客户区
                  ↓
-按住配置键 → 录制默认麦克风 → 松开
+按住配置键 → 默认麦克风 PCM16 每 100ms 送入流式 ASR
                  ↓
-ASR → [玩家文字, 游戏截图] → 单次多模态 Agent → TTS → Windows 播放
+最终转写 → [玩家文字, 游戏截图] → 单次多模态 Agent
+                 ↓
+正文增量显示；成句文本立即 TTS；PCM 音频边返回边播放
 ```
 
-游戏 Agent 直接使用支持图片输入的模型，不先生成视觉描述，也不再串接第二个对话模型；当前提示词不包含 Adapter 的结构化 observation。默认 `F8` 仅在游戏窗口位于前台时触发录音。一个 profile 当前只有一个全局键，可用 Virtual-Key `81` 配置 Q、`86` 配置 V。Gateway 还提供 `chat.retry`（保留会话但禁止重复反馈）和 `assistant.compose`（一次性生成，不污染对话记忆）。
+游戏 Agent 直接使用支持图片输入的模型，不先生成视觉描述，也不再串接第二个对话模型；当前提示词不包含 Adapter 的结构化 observation。默认 `F8` 仅在游戏窗口位于前台时触发录音。再次按下语音键会中止当前回复和音频播放。一个 profile 当前只有一个全局键，可用 Virtual-Key `81` 配置 Q、`86` 配置 V。Gateway 还提供 `chat.retry`（保留会话但禁止重复反馈）和 `assistant.compose`（一次性生成，不污染对话记忆）。
+
+主动聊天由 Harness 统一调度，默认在玩家连续 3 分钟没有文字或语音交互后触发。Harness 会截取对应游戏窗口，把画面交给该游戏 Agent，并通过 Adapter 显示回复；语音可用时同时播放 TTS。星露谷、饥荒和缺氧共用这一设置，Adapter 不再分别维护聊天计时器。
 
 媒体 Host 是 Windows x64 自包含程序，打包时必须确认 `.tgz` 中存在：
 

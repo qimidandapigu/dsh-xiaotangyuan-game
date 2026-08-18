@@ -13,7 +13,11 @@ describe('game runtime configuration', () => {
     expect(config.speech.recognitionProvider).toBe('auto')
     expect(config.speech.synthesisProvider).toBe('auto')
     expect(config.speech.credentialRef).toBe('VOLCENGINE_API_KEY')
+    expect(config.speech.asrFastResourceId).toBe('volc.bigasr.auc_turbo')
+    expect(config.speech.asrStreamingResourceId).toBe('volc.bigasr.sauc.duration')
     expect(config.media.pushToTalkVirtualKey).toBe(0x77)
+    expect(config.proactiveChat.enabled).toBe(true)
+    expect(config.proactiveChat.intervalSeconds).toBe(180)
     expect(JSON.stringify(config)).not.toContain('apiKey')
   })
 
@@ -27,6 +31,11 @@ describe('game runtime configuration', () => {
 
   it('rejects an unsafe screenshot width', () => {
     expect(() => resolveConfig({ vision: { maxWidth: 200 } })).toThrow('vision.maxWidth')
+  })
+
+  it('validates the shared proactive chat interval', () => {
+    expect(resolveConfig({ proactiveChat: { intervalSeconds: 300 } }).proactiveChat.intervalSeconds).toBe(300)
+    expect(() => resolveConfig({ proactiveChat: { intervalSeconds: 30 } })).toThrow('proactiveChat.intervalSeconds')
   })
 
   it('requires a complete, checksummed local Dont Starve installer override', () => {
@@ -54,6 +63,23 @@ describe('game protocol extensions', () => {
       protocolVersion: '1.0',
       processId: 1234,
     }).processId).toBe(1234)
+  })
+
+  it('negotiates optional adapter capabilities without breaking protocol 1.0 clients', () => {
+    expect(readAdapterHello({
+      adapterId: 'test.adapter',
+      gameId: 'test-game',
+      version: '1.0.0',
+      protocolVersion: '1.1',
+      capabilities: ['assistant.text-stream'],
+    }).capabilities).toEqual(['assistant.text-stream'])
+    expect(() => readAdapterHello({
+      adapterId: 'test.adapter',
+      gameId: 'test-game',
+      version: '1.0.0',
+      protocolVersion: '1.1',
+      capabilities: [1],
+    })).toThrow('capabilities')
   })
 
   it('accepts structured state updates', () => {

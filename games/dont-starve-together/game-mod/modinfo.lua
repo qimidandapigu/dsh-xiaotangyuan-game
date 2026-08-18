@@ -1,7 +1,7 @@
 name = "Don't Starve AI Mod"
-description = "Press V to talk with Chester through DeepSeek Harness."
+description = "按 V 通过 DeepSeek Harness 与小汤圆对话。"
 author = "Don't Starve AI Mod contributors"
-version = "0.2.18"
+version = "0.2.20"
 
 api_version = 10
 dst_compatible = true
@@ -19,8 +19,8 @@ end
 configuration_options = {
     {
         name = "chester_slots",
-        label = "切斯特格数",
-        hover = "调整切斯特背包容量。更改后重启世界生效。",
+        label = "小汤圆格数",
+        hover = "调整小汤圆背包容量。更改后重启世界生效。",
         options = {
             choice("9 格（默认）", 9),
             choice("18 格", 18),
@@ -31,8 +31,8 @@ configuration_options = {
     },
     {
         name = "chester_light_enabled",
-        label = "切斯特发光",
-        hover = "让切斯特持续提供光源。更改后重启世界生效。",
+        label = "小汤圆发光",
+        hover = "让小汤圆持续提供光源。更改后重启世界生效。",
         options = {
             choice("关闭", false),
             choice("开启（默认）", true),
@@ -41,8 +41,8 @@ configuration_options = {
     },
     {
         name = "chester_light_radius",
-        label = "切斯特发光范围",
-        hover = "调整切斯特周围的照明半径。更改后重启世界生效。",
+        label = "小汤圆发光范围",
+        hover = "调整小汤圆周围的照明半径。更改后重启世界生效。",
         options = {
             choice("小", 2),
             choice("中（默认）", 3),
@@ -86,7 +86,7 @@ configuration_options = {
     {
         name = "reminder_health",
         label = "低血量提醒",
-        hover = "生命低于 30% 时让切斯特提醒。",
+        hover = "生命低于 30% 时让小汤圆提醒。",
         options = {
             choice("关闭", false),
             choice("开启（默认）", true),
@@ -96,7 +96,7 @@ configuration_options = {
     {
         name = "reminder_hunger",
         label = "饥饿提醒",
-        hover = "饥饿低于 25% 时让切斯特提醒。",
+        hover = "饥饿低于 25% 时让小汤圆提醒。",
         options = {
             choice("关闭", false),
             choice("开启（默认）", true),
@@ -106,7 +106,7 @@ configuration_options = {
     {
         name = "reminder_night",
         label = "夜晚提醒",
-        hover = "进入夜晚时让切斯特提醒准备照明。",
+        hover = "进入夜晚时让小汤圆提醒准备照明。",
         options = {
             choice("关闭", false),
             choice("开启（默认）", true),
@@ -116,7 +116,7 @@ configuration_options = {
     {
         name = "reminder_wet",
         label = "潮湿提醒",
-        hover = "潮湿高于 60% 时让切斯特提醒。",
+        hover = "潮湿高于 60% 时让小汤圆提醒。",
         options = {
             choice("关闭", false),
             choice("开启（默认）", true),
@@ -126,7 +126,7 @@ configuration_options = {
     {
         name = "reminder_boss",
         label = "附近 Boss 提醒",
-        hover = "24 格内发现带 epic 标签的 Boss 时让切斯特提醒。",
+        hover = "24 格内发现带 epic 标签的 Boss 时让小汤圆提醒。",
         options = {
             choice("关闭", false),
             choice("开启（默认）", true),

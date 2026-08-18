@@ -12,6 +12,7 @@ import { failure, parseRpcRequest, success, type RpcRequest } from '../protocol/
 import { GameAgentSession } from '../runtime/agent/game-agent-session.js'
 import { MultimodalRouter } from '../runtime/multimodal/multimodal-router.js'
 import type { VoiceInteractionHandler } from '../runtime/speech/speech-controller.js'
+import type { ResolvedConfig } from '../config.js'
 
 interface ConnectionState {
   socket: WebSocket
@@ -19,20 +20,35 @@ interface ConnectionState {
   session?: GameAgentSession
   latestObservation?: Record<string, unknown>
   queue: Promise<void>
+  lastInteractionAt: number
+  proactiveInFlight: boolean
+  speechQueue: Promise<void>
+  streamingInteractions: Set<string>
 }
+
+const PROACTIVE_PROMPT = [
+  '玩家已经一段时间没有和你说话了。',
+  '观察当前游戏画面，主动说一句简短、自然、符合当前情况的话。',
+  '有值得提醒的事情就给出实用提醒；没有要紧事就轻松陪伴或随口聊聊。',
+  '不要提到定时器、截图、系统提示或“玩家没有说话”。',
+].join('')
 
 export class GameGateway implements VoiceInteractionHandler {
   private readonly server: WebSocketServer
   private readonly connections = new Set<ConnectionState>()
+  private readonly proactiveTimer: ReturnType<typeof setInterval>
 
   constructor(
     private readonly ctx: Context,
     host: string,
     port: number,
     private readonly multimodal: MultimodalRouter,
+    private readonly proactiveChat: ResolvedConfig['proactiveChat'],
     private readonly processTargetsChanged: (processIds: readonly number[]) => void,
     private readonly feedbackEnabled: boolean,
     private readonly speak: (text: string, signal: AbortSignal) => Promise<void>,
+    private readonly appendSpeechDelta: (processId: number, interactionId: string, delta: string) => Promise<void>,
+    private readonly finishSpeechReply: (processId: number, interactionId: string, finalText: string) => Promise<boolean>,
   ) {
     this.server = new WebSocketServer({ host, port, maxPayload: 1024 * 1024 })
     this.server.on('connection', socket => this.onConnection(socket))
@@ -42,15 +58,31 @@ export class GameGateway implements VoiceInteractionHandler {
     this.server.on('error', error => {
       console.error('[dsh-xiaotangyuan-game] WebSocket server error', error)
     })
+    this.proactiveTimer = setInterval(() => {
+      void this.runProactiveCycle().catch(error => {
+        this.ctx.logger.warn('xiaotangyuan-game: 主动聊天调度失败')
+        this.ctx.logger.warn(error)
+      })
+    }, 1_000)
   }
 
   private onConnection(socket: WebSocket): void {
-    const state: ConnectionState = { socket, queue: Promise.resolve() }
+    const state: ConnectionState = {
+      socket,
+      queue: Promise.resolve(),
+      lastInteractionAt: Date.now(),
+      proactiveInFlight: false,
+      speechQueue: Promise.resolve(),
+      streamingInteractions: new Set(),
+    }
     this.connections.add(state)
     this.send(socket, {
       jsonrpc: '2.0',
       method: 'gateway.ready',
-      params: { protocolVersion: '1.0' },
+      params: {
+        protocolVersion: '1.1',
+        capabilities: ['assistant.text-stream', 'speech.asr-stream', 'speech.tts-stream', 'speech.barge-in'],
+      },
     })
 
     socket.on('message', (data) => {
@@ -101,23 +133,52 @@ export class GameGateway implements VoiceInteractionHandler {
       case 'adapter.hello': {
         if (state.session !== undefined) throw new Error('adapter.hello may only be sent once per connection')
         state.adapter = readAdapterHello(request.params)
-        state.session = new GameAgentSession(this.ctx, state.adapter, this.multimodal, this.feedbackEnabled)
+        state.session = new GameAgentSession(
+          this.ctx,
+          state.adapter,
+          this.multimodal,
+          this.feedbackEnabled,
+          update => {
+            if (!state.streamingInteractions.has(update.interactionId)) {
+              state.streamingInteractions.add(update.interactionId)
+              this.notify(state, 'assistant.text.start', {
+                interactionId: update.interactionId,
+                source: update.source,
+              })
+            }
+            this.notify(state, 'assistant.text.delta', update)
+            if (state.adapter?.capabilities?.includes('assistant.text-stream') !== true) {
+              this.notify(state, 'assistant.delta', update)
+            }
+            if (update.source === 'voice' && state.adapter?.processId !== undefined) {
+              state.speechQueue = state.speechQueue.then(() => this.appendSpeechDelta(state.adapter!.processId!, update.interactionId, update.delta)).catch(error => {
+                this.ctx.logger.warn('xiaotangyuan-game: 流式语音合成入队失败')
+                this.ctx.logger.warn(error)
+              })
+            }
+          },
+        )
         this.publishProcessTargets()
-        return { accepted: true, protocolVersion: '1.0' }
+        return { accepted: true, protocolVersion: '1.1' }
       }
       case 'gateway.ping':
         return { pong: true }
       case 'chat.send': {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before chat.send')
+        this.markInteraction(state)
         const chat = readGameChat(request.params)
         if (chat.context?.observation !== undefined) state.latestObservation = chat.context.observation
-        return await state.session.ask(chat)
+        const result = await state.session.ask(chat)
+        this.finishTextStream(state, result.interactionId, result.reply, 'chat')
+        return result
       }
       case 'chat.retry': {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before chat.retry')
+        this.markInteraction(state)
         const retry = readGameRetry(request.params)
         if (retry.context?.observation !== undefined) state.latestObservation = retry.context.observation
         const result = await state.session.retry(retry.context)
+        this.finishTextStream(state, result.interactionId, result.reply, 'retry')
         this.notify(state, 'assistant.present', { text: result.reply, source: 'retry' })
         void this.speak(result.reply, AbortSignal.timeout(120_000)).catch(error => {
           const message = error instanceof Error ? error.message : String(error)
@@ -127,6 +188,7 @@ export class GameGateway implements VoiceInteractionHandler {
       }
       case 'assistant.compose': {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before assistant.compose')
+        this.markInteraction(state)
         const chat = readGameChat(request.params)
         if (chat.context?.observation !== undefined) state.latestObservation = chat.context.observation
         return await state.session.compose(chat)
@@ -136,6 +198,59 @@ export class GameGateway implements VoiceInteractionHandler {
         return { accepted: true }
       default:
         throw new Error(`unknown method: ${request.method}`)
+    }
+  }
+
+  private markInteraction(state: ConnectionState): void {
+    state.lastInteractionAt = Date.now()
+  }
+
+  private async runProactiveCycle(): Promise<void> {
+    if (!this.proactiveChat.enabled) return
+    const now = Date.now()
+    const intervalMs = this.proactiveChat.intervalSeconds * 1_000
+    const due = [...this.connections].filter(state =>
+      state.socket.readyState === WebSocket.OPEN
+      && state.session !== undefined
+      && !state.proactiveInFlight
+      && now - state.lastInteractionAt >= intervalMs)
+    const scheduled = due.map(state => {
+      state.proactiveInFlight = true
+      state.lastInteractionAt = now
+      const task = state.queue.then(() => this.runProactiveChat(state))
+      state.queue = task.catch(error => {
+        this.ctx.logger.warn('xiaotangyuan-game: 主动聊天队列执行失败')
+        this.ctx.logger.warn(error)
+      })
+      return task
+    })
+    await Promise.allSettled(scheduled)
+  }
+
+  private async runProactiveChat(state: ConnectionState): Promise<void> {
+    if (state.session === undefined) {
+      state.proactiveInFlight = false
+      return
+    }
+    try {
+      const context: GameChatContext = {
+        ...(state.latestObservation === undefined ? {} : { observation: state.latestObservation }),
+      }
+      const result = await state.session.compose({ text: PROACTIVE_PROMPT, context })
+      if (!this.connections.has(state) || state.socket.readyState !== WebSocket.OPEN) return
+      this.notify(state, 'assistant.present', { text: result.reply, source: 'proactive' })
+      this.finishTextStream(state, result.interactionId, result.reply, 'proactive')
+      try {
+        await this.speak(result.reply, AbortSignal.timeout(120_000))
+      } catch (error) {
+        this.ctx.logger.warn(`xiaotangyuan-game: ${state.adapter?.gameId ?? 'unknown'} 主动回复已显示，但语音播放失败`)
+        this.ctx.logger.warn(error)
+      }
+    } catch (error) {
+      this.ctx.logger.warn(`xiaotangyuan-game: ${state.adapter?.gameId ?? 'unknown'} 主动聊天生成失败`)
+      this.ctx.logger.warn(error)
+    } finally {
+      state.proactiveInFlight = false
     }
   }
 
@@ -155,7 +270,12 @@ export class GameGateway implements VoiceInteractionHandler {
 
   recordingStarted(processId: number): void {
     const connection = this.connectionForProcess(processId)
-    if (connection !== undefined) this.notify(connection, 'assistant.status', { status: 'recording' })
+    if (connection !== undefined) {
+      connection.session?.cancel()
+      connection.streamingInteractions.clear()
+      this.notify(connection, 'assistant.text.cancel', { reason: 'barge-in' })
+      this.notify(connection, 'assistant.status', { status: 'recording' })
+    }
   }
 
   transcriptReady(processId: number, transcript: string): void {
@@ -163,15 +283,19 @@ export class GameGateway implements VoiceInteractionHandler {
     if (connection !== undefined) this.notify(connection, 'assistant.status', { status: 'thinking', transcript })
   }
 
-  async respond(processId: number, transcript: string, _signal: AbortSignal): Promise<string> {
+  async respond(processId: number, transcript: string, _signal: AbortSignal): Promise<{ reply: string, speechPlayed: boolean }> {
     const connection = this.connectionForProcess(processId)
     if (connection?.session === undefined) throw new Error('前台游戏没有连接到小汤圆 Gateway')
+    this.markInteraction(connection)
     const context: GameChatContext = {
       ...(connection.latestObservation === undefined ? {} : { observation: connection.latestObservation }),
     }
-    const result = await connection.session.ask({ text: transcript, context })
+    const result = await connection.session.ask({ text: transcript, context }, 'voice')
+    await connection.speechQueue
+    const speechPlayed = await this.finishSpeechReply(processId, result.interactionId, result.reply)
     this.notify(connection, 'assistant.present', { text: result.reply, source: 'voice' })
-    return result.reply
+    this.finishTextStream(connection, result.interactionId, result.reply, 'voice')
+    return { reply: result.reply, speechPlayed }
   }
 
   failed(processId: number, message: string): void {
@@ -183,7 +307,18 @@ export class GameGateway implements VoiceInteractionHandler {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload))
   }
 
+  recordingStopped(processId: number): void {
+    const connection = this.connectionForProcess(processId)
+    if (connection !== undefined) this.notify(connection, 'assistant.status', { status: 'thinking' })
+  }
+
+  private finishTextStream(connection: ConnectionState, interactionId: string, text: string, source: string): void {
+    connection.streamingInteractions.delete(interactionId)
+    this.notify(connection, 'assistant.text.done', { interactionId, text, source })
+  }
+
   async close(): Promise<void> {
+    clearInterval(this.proactiveTimer)
     const sessions: GameAgentSession[] = []
     for (const connection of this.connections) {
       connection.socket.close(1001, 'gateway shutting down')

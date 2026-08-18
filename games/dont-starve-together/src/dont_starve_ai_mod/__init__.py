@@ -1,3 +1,3 @@
 """Don't Starve Together Adapter for DeepSeek Harness."""
 
-__version__ = "0.2.18"
+__version__ = "0.2.20"

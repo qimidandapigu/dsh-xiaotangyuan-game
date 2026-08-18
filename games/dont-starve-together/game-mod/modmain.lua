@@ -1,4 +1,5 @@
 local GLOBAL = GLOBAL
+GLOBAL.STRINGS.NAMES.CHESTER = "小汤圆"
 local JINGLING_ANIM_FILE = "anim/jingling.zip"
 local JINGLING_ANIM_AVAILABLE = GLOBAL.kleifileexists(MODROOT .. JINGLING_ANIM_FILE)
 
@@ -1540,17 +1541,37 @@ local function install_jingling_visual(inst)
     local visual = GLOBAL.CreateEntity()
     visual.entity:AddTransform()
     visual.entity:AddAnimState()
-    visual.entity:AddDynamicShadow()
     visual.entity:SetParent(inst.entity)
     visual.persists = false
     visual.AnimState:SetBank("jingling")
     visual.AnimState:SetBuild("jingling")
-    visual.AnimState:PlayAnimation("idle", true)
+    visual.AnimState:PlayAnimation("idle_front", true)
     visual.AnimState:SetFinalOffset(1)
-    visual.DynamicShadow:SetSize(1.15, 0.55)
 
-    local active_animation = "idle"
+    local active_animation = "idle_front"
     local active_mode = JINGLING_VISUAL_IDLE
+    local function get_jingling_direction()
+        -- Transform rotation is world-space and becomes visually wrong when
+        -- the player rotates the camera. The parent AnimState has already
+        -- converted that rotation into the actual screen-facing direction.
+        local facing = inst.AnimState:GetCurrentFacing()
+        if facing == GLOBAL.FACING_UP then
+            return "back"
+        elseif facing == GLOBAL.FACING_DOWN then
+            return "front"
+        elseif facing == GLOBAL.FACING_LEFT
+            or facing == GLOBAL.FACING_UPLEFT
+            or facing == GLOBAL.FACING_DOWNLEFT
+        then
+            return "west"
+        elseif facing == GLOBAL.FACING_RIGHT
+            or facing == GLOBAL.FACING_UPRIGHT
+            or facing == GLOBAL.FACING_DOWNRIGHT
+        then
+            return "east"
+        end
+        return "front"
+    end
     local function update_jingling_visual_mode()
         local mode = inst._jingling_visual_mode ~= nil and inst._jingling_visual_mode:value()
             or JINGLING_VISUAL_IDLE
@@ -1571,7 +1592,7 @@ local function install_jingling_visual(inst)
             return
         end
         local moving = inst.sg ~= nil and inst.sg:HasStateTag("moving")
-        local next_animation = moving and "walk_loop" or "idle"
+        local next_animation = (moving and "walk_" or "idle_") .. get_jingling_direction()
         if next_animation ~= active_animation then
             visual.AnimState:PlayAnimation(next_animation, true)
             active_animation = next_animation
@@ -1648,6 +1669,7 @@ local function install_chester_speech_bubble(inst)
 end
 
 AddPrefabPostInit("chester", function(inst)
+    inst.name = "小汤圆"
     configure_chester_light(inst)
     inst._jingling_visual_mode = GLOBAL.net_tinybyte(
         inst.GUID,

@@ -1,10 +1,18 @@
 import { randomUUID } from 'node:crypto'
+import { performance } from 'node:perf_hooks'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection, type AgentHandle, type ModelSelection, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { AdapterHello, GameChatContext, GameChatRequest } from '../../protocol/game.js'
 import { MultimodalRouter } from '../multimodal/multimodal-router.js'
+import { StreamingReplyAccumulator, type StreamingReplyUpdate } from './streaming-reply.js'
+
+export type InteractionSource = 'chat' | 'voice' | 'retry'
+
+export interface AssistantProgress extends StreamingReplyUpdate {
+  source: InteractionSource
+}
 
 function latestAssistantText(events: readonly SessionEvent[], firstSeq: number): string {
   let text = ''
@@ -62,13 +70,25 @@ export class GameAgentSession {
   private handle?: AgentHandle
   private selection?: ModelSelection
   private lastRequest?: GameChatRequest
+  private readonly activeStreams = new Map<string, {
+    firstSeq: number
+    accumulator: StreamingReplyAccumulator
+  }>()
 
   constructor(
     private readonly ctx: Context,
     private readonly adapter: AdapterHello | undefined,
     private readonly multimodal: MultimodalRouter,
     private readonly feedbackEnabled = false,
+    private readonly progress?: (update: AssistantProgress) => void,
   ) {}
+
+  private onSessionEvent(sessionId: string, event: SessionEvent): void {
+    const active = this.activeStreams.get(sessionId)
+    if (active === undefined || event.seq < active.firstSeq || event.type !== 'assistant/chunk') return
+    const chunk = event.data.chunk
+    if (chunk.type === 'text-delta') active.accumulator.append(event.data.step, chunk.text)
+  }
 
   private async createAgent(selection: ModelSelection): Promise<AgentHandle> {
     const handle = await this.ctx.agents.create({
@@ -78,6 +98,7 @@ export class GameAgentSession {
       setup: (agentCtx) => {
         const selected: ModelSelectionRef = { current: selection, assembled: undefined }
         installModelSelection(agentCtx, selected)
+        agentCtx.on('session/event', (session, event) => this.onSessionEvent(String(session.id), event))
       },
     })
     await handle.agent.whenIdle()
@@ -101,32 +122,80 @@ export class GameAgentSession {
     request: GameChatRequest,
     image: Awaited<ReturnType<MultimodalRouter['prepareProcess']>>['image'],
     mode: 'normal' | 'retry' | 'compose',
-  ): Promise<{ reply: string, sessionId: string }> {
+    interactionId: string,
+    source: InteractionSource | 'compose',
+  ): Promise<{ reply: string, sessionId: string, firstTextMs?: number, modelMs: number }> {
     const firstSeq = handle.agent.session.seq
+    const sessionId = String(handle.agent.session.id)
+    if (this.activeStreams.has(sessionId)) throw new Error('当前游戏会话仍在处理上一条请求')
+    const modelStarted = performance.now()
+    const accumulator = new StreamingReplyAccumulator(
+      interactionId,
+      modelStarted,
+      source === 'compose' || this.progress === undefined
+        ? undefined
+        : update => this.progress?.({ ...update, source }),
+    )
+    this.activeStreams.set(sessionId, { firstSeq, accumulator })
     const content: ContentBlock[] = [{
       type: 'text',
       text: formatGamePrompt(this.adapter, request, undefined, mode === 'normal' && this.feedbackEnabled, mode),
     }]
     content.push({ type: 'image', attachment: image })
-    handle.agent.followup(createUserMessage({
-      content,
-      source: { kind: 'user' },
-    }))
-    await handle.agent.whenIdle()
-    await this.ctx.sessions.flush(handle.agent.session)
+    try {
+      handle.agent.followup(createUserMessage({
+        content,
+        source: { kind: 'user' },
+      }))
+      await handle.agent.whenIdle()
+      await this.ctx.sessions.flush(handle.agent.session)
 
-    const reply = latestAssistantText(handle.agent.session.events, firstSeq)
-    if (reply === '') throw new Error('model returned no text reply')
-    return { reply, sessionId: String(handle.agent.session.id) }
+      const reply = latestAssistantText(handle.agent.session.events, firstSeq)
+      if (reply === '') throw new Error('model returned no text reply')
+      return {
+        reply,
+        sessionId,
+        ...(accumulator.firstTextElapsedMs() === undefined
+          ? {}
+          : { firstTextMs: accumulator.firstTextElapsedMs() }),
+        modelMs: performance.now() - modelStarted,
+      }
+    } finally {
+      accumulator.close()
+      this.activeStreams.delete(sessionId)
+    }
   }
 
-  async ask(request: GameChatRequest): Promise<{ reply: string, sessionId: string }> {
-    this.lastRequest = request
+  private async execute(
+    request: GameChatRequest,
+    mode: 'normal' | 'retry' | 'compose',
+    source: InteractionSource | 'compose',
+  ): Promise<{ reply: string, sessionId: string, interactionId: string }> {
+    const interactionId = randomUUID()
+    const started = performance.now()
     const input = await this.multimodal.prepareProcess(this.adapter?.processId, AbortSignal.timeout(10_000))
-    return await this.run(await this.ensureAgent(input.selection), request, input.image, 'normal')
+    const prepared = performance.now()
+    const ephemeral = mode === 'compose'
+    const handle = ephemeral ? await this.createAgent(input.selection) : await this.ensureAgent(input.selection)
+    const agentReady = performance.now()
+    try {
+      const result = await this.run(handle, request, input.image, mode, interactionId, source)
+      const firstText = result.firstTextMs === undefined ? 'none' : Math.round(result.firstTextMs)
+      this.ctx.logger.info(
+        `xiaotangyuan latency interaction=${interactionId} game=${this.adapter?.gameId ?? 'unknown'} source=${source} model=${input.selection.provider}/${input.selection.model} selectionMs=${Math.round(input.timing.modelSelectionMs)} captureMs=${Math.round(input.timing.captureMs)} attachmentMs=${Math.round(input.timing.attachmentMs)} agentReadyMs=${Math.round(agentReady - prepared)} firstTextMs=${firstText} modelMs=${Math.round(result.modelMs)} totalMs=${Math.round(performance.now() - started)}`,
+      )
+      return { reply: result.reply, sessionId: result.sessionId, interactionId }
+    } finally {
+      if (ephemeral) await handle.dispose()
+    }
   }
 
-  async retry(context?: GameChatContext): Promise<{ reply: string, sessionId: string }> {
+  async ask(request: GameChatRequest, source: 'chat' | 'voice' = 'chat'): Promise<{ reply: string, sessionId: string, interactionId: string }> {
+    this.lastRequest = request
+    return await this.execute(request, 'normal', source)
+  }
+
+  async retry(context?: GameChatContext): Promise<{ reply: string, sessionId: string, interactionId: string }> {
     if (this.lastRequest === undefined) throw new Error('当前游戏会话还没有可重试的玩家请求')
     const request: GameChatRequest = {
       text: this.lastRequest.text,
@@ -134,23 +203,22 @@ export class GameAgentSession {
         ? {}
         : { context: context ?? this.lastRequest.context }),
     }
-    const input = await this.multimodal.prepareProcess(this.adapter?.processId, AbortSignal.timeout(10_000))
-    return await this.run(await this.ensureAgent(input.selection), request, input.image, 'retry')
+    return await this.execute(request, 'retry', 'retry')
   }
 
-  async compose(request: GameChatRequest): Promise<{ reply: string, sessionId: string }> {
-    const input = await this.multimodal.prepareProcess(this.adapter?.processId, AbortSignal.timeout(10_000))
-    const handle = await this.createAgent(input.selection)
-    try {
-      return await this.run(handle, request, input.image, 'compose')
-    } finally {
-      await handle.dispose()
-    }
+  async compose(request: GameChatRequest): Promise<{ reply: string, sessionId: string, interactionId: string }> {
+    return await this.execute(request, 'compose', 'compose')
+  }
+
+  cancel(): void {
+    this.handle?.agent.cancel({ kind: 'user' })
   }
 
   async dispose(): Promise<void> {
     await this.handle?.dispose()
     this.handle = undefined
     this.selection = undefined
+    for (const active of this.activeStreams.values()) active.accumulator.close()
+    this.activeStreams.clear()
   }
 }

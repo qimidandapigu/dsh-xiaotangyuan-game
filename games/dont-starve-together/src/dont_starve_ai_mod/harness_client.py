@@ -90,7 +90,8 @@ class HarnessClient:
                             "adapterId": self.adapter_id,
                             "gameId": self.game_id,
                             "version": self.version,
-                            "protocolVersion": "1.0",
+                            "protocolVersion": "1.1",
+                            "capabilities": ["assistant.text-stream"],
                             "processId": self._process_id,
                         },
                     }

@@ -40,7 +40,8 @@ namespace DoubaoAI.ONI.Harness
                 ["adapterId"] = "qimidandapigu.oxygen-not-included-fairy",
                 ["gameId"] = "oxygen-not-included",
                 ["version"] = "0.1.0",
-                ["protocolVersion"] = "1.0",
+                ["protocolVersion"] = "1.1",
+                ["capabilities"] = new JArray("assistant.text-stream"),
                 ["processId"] = Process.GetCurrentProcess().Id
             });
         }

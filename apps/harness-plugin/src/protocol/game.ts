@@ -4,6 +4,7 @@ export interface AdapterHello {
   version: string
   protocolVersion: string
   processId?: number
+  capabilities?: string[]
 }
 
 export interface GameChatContext {
@@ -48,6 +49,10 @@ export function readAdapterHello(value: unknown): AdapterHello {
   const processId = params.processId
   if (processId !== undefined && (!Number.isSafeInteger(processId) || (processId as number) <= 0)) {
     throw new Error('processId must be a positive integer when provided')
+  }
+  const capabilities = params.capabilities
+  if (capabilities !== undefined && (!Array.isArray(capabilities) || capabilities.some(value => typeof value !== 'string'))) {
+    throw new Error('capabilities must be an array of strings when provided')
   }
   return params as unknown as AdapterHello
 }

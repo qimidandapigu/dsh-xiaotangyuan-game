@@ -17,7 +17,9 @@ namespace DoubaoAI.ONI.Assets
                     UnityEngine.Object.Destroy(texture);
                     return null;
                 }
-                texture.filterMode = FilterMode.Point;
+                // ONI renders the companion as smooth UI art. Bilinear sampling keeps
+                // the high-resolution source clean when it is drawn at 72x72.
+                texture.filterMode = FilterMode.Bilinear;
                 texture.wrapMode = TextureWrapMode.Clamp;
                 return texture;
             }
@@ -26,30 +28,6 @@ namespace DoubaoAI.ONI.Assets
                 Debug.LogWarning("[DoubaoAI] 读取形象资源失败：" + ex.Message);
                 return null;
             }
-        }
-
-        internal static Texture2D CreateHalo(int size)
-        {
-            var texture = new Texture2D(size, size, TextureFormat.ARGB32, false);
-            var pixels = new Color[size * size];
-            float center = (size - 1) * 0.5f;
-            for (int y = 0; y < size; y++)
-            {
-                for (int x = 0; x < size; x++)
-                {
-                    float dx = (x - center) / center;
-                    float dy = (y - center) / center;
-                    float distance = Mathf.Sqrt(dx * dx + dy * dy);
-                    float ring = Mathf.Clamp01(1f - Mathf.Abs(distance - 0.76f) * 12f);
-                    float glow = Mathf.Clamp01(1f - distance) * 0.18f;
-                    Color tint = x < center ? new Color(0.20f, 0.95f, 1f, ring * 0.8f + glow) : new Color(0.74f, 0.35f, 1f, ring * 0.8f + glow);
-                    pixels[y * size + x] = tint;
-                }
-            }
-            texture.SetPixels(pixels);
-            texture.Apply(false, false);
-            texture.filterMode = FilterMode.Bilinear;
-            return texture;
         }
     }
 }

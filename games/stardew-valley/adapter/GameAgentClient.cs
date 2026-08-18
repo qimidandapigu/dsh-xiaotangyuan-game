@@ -19,6 +19,7 @@ internal sealed class GameAgentClient : IAsyncDisposable
     private long nextRequestId;
 
     public event Action<string>? AssistantPresented;
+    public event Action<string>? AssistantStreaming;
     public event Action<string, string?>? AssistantStatusChanged;
     public event Action<string>? AssistantFailed;
 
@@ -87,7 +88,8 @@ internal sealed class GameAgentClient : IAsyncDisposable
                     adapterId = "qimidandapigu.StardewAgent",
                     gameId = "stardew-valley",
                     version = "0.3.0",
-                    protocolVersion = "1.0",
+                    protocolVersion = "1.1",
+                    capabilities = new[] { "assistant.text-stream" },
                     processId = Environment.ProcessId
                 },
                 cancellationToken
@@ -174,7 +176,12 @@ internal sealed class GameAgentClient : IAsyncDisposable
                 do
                 {
                     result = await activeSocket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
-                    if (result.MessageType == WebSocketMessageType.Close) return;
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        if (!cancellationToken.IsCancellationRequested)
+                            this.AssistantFailed?.Invoke("与 Harness 的连接已关闭，请确认 Harness 正在运行。");
+                        return;
+                    }
                     message.Write(buffer, 0, result.Count);
                     if (message.Length > 4 * 1024 * 1024)
                         throw new InvalidOperationException("Gateway message exceeded 4 MiB.");
@@ -211,6 +218,11 @@ internal sealed class GameAgentClient : IAsyncDisposable
         JsonElement parameters = root.TryGetProperty("params", out JsonElement value) ? value : default;
         switch (method)
         {
+            case "assistant.delta":
+            case "assistant.text.delta":
+                if (parameters.TryGetProperty("text", out JsonElement partialText))
+                    this.AssistantStreaming?.Invoke(partialText.GetString() ?? "");
+                break;
             case "assistant.present":
                 if (parameters.TryGetProperty("text", out JsonElement text))
                     this.AssistantPresented?.Invoke(text.GetString() ?? "");

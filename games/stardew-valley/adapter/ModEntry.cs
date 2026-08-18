@@ -26,6 +26,10 @@ public sealed class ModEntry : Mod
         this.companion = new CompanionLocator(helper, this.Monitor);
         this.speechBubble = new SpeechBubble(this.companion.TryGetWorldPosition);
         this.client = new GameAgentClient(this.config.GatewayUrl);
+        this.client.AssistantStreaming += text => this.mainThreadActions.Enqueue(() =>
+        {
+            if (!string.IsNullOrWhiteSpace(text)) this.speechBubble.ShowStatus(text);
+        });
         this.client.AssistantPresented += text => this.mainThreadActions.Enqueue(() => this.speechBubble.Show(text));
         this.client.AssistantStatusChanged += (status, transcript) => this.mainThreadActions.Enqueue(() =>
         {

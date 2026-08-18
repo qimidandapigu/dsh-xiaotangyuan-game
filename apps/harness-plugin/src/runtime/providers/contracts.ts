@@ -16,6 +16,24 @@ export interface MultimodalProvider extends CapabilityProvider {
 
 export interface SpeechRecognitionProvider extends CapabilityProvider {
   transcribe(audio: BinaryAsset, signal: AbortSignal): Promise<string>
+  startStreaming?(request: StreamingRecognitionRequest, signal: AbortSignal): Promise<StreamingRecognitionSession>
+}
+
+export interface PcmFormat {
+  sampleRate: number
+  bitsPerSample: 16
+  channels: 1
+}
+
+export interface StreamingRecognitionRequest {
+  format: PcmFormat
+  onPartial?: (text: string) => void
+}
+
+export interface StreamingRecognitionSession {
+  push(bytes: Uint8Array): void
+  finish(): Promise<string>
+  cancel(reason?: unknown): void
 }
 
 export interface SpeechSynthesisRequest {
@@ -25,6 +43,7 @@ export interface SpeechSynthesisRequest {
 
 export interface SpeechSynthesisProvider extends CapabilityProvider {
   synthesize(request: SpeechSynthesisRequest, signal: AbortSignal): Promise<BinaryAsset>
+  synthesizeStream?(request: SpeechSynthesisRequest, signal: AbortSignal): AsyncIterable<Uint8Array>
 }
 
 export interface SpeechCapabilityProvider extends SpeechRecognitionProvider, SpeechSynthesisProvider {}

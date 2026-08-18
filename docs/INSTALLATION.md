@@ -6,17 +6,17 @@
 
 | 项目 | 要求 |
 |---|---|
-| DeepSeek Harness 插件 | 源码 `0.6.2`；最新公开 Release `0.5.1` |
+| DeepSeek Harness 插件 | 源码 `0.7.1`；最新公开 Release `0.5.1` |
 | Stardew Valley | `1.6.15` 或更高 |
 | SMAPI | `4.4.0` 或更高 |
 | Content Patcher | 安装器固定为 `2.9.1` |
 | TrinketTinker | 安装器固定为 `1.9.0` |
 | 语音媒体 Host | Windows x64 |
-| 饥荒联机版 Mod | `0.2.18` |
-| 缺氧 Adapter | `0.1.3` |
-| 缺氧 C# Bridge | `0.6.1` |
+| 饥荒联机版 Mod | `0.2.20` |
+| 缺氧 Adapter | `0.1.4` |
+| 缺氧 C# Bridge | `0.6.5` |
 
-文字对话和游戏适配器不应依赖具体模型厂商。当前 `0.6.2` 源码中的语音 Provider 实现是火山引擎；游戏会话由 DSH 中支持图片输入的模型直接接收玩家文字和截图并回答，不再串联第二个对话模型。
+文字对话和游戏适配器不应依赖具体模型厂商。当前 `0.7.1` 源码中的语音 Provider 实现是火山引擎；游戏会话由 DSH 中支持图片输入的模型直接接收玩家文字和截图并回答，不再串联第二个对话模型。
 
 ## 1. 安装 Harness 插件
 
@@ -128,7 +128,7 @@ dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-
 检测并安装《缺氧》的 AI 精灵 Mod
 ```
 
-Harness 会调用 `oxygen_not_included_mod_detect` 和 `oxygen_not_included_mod_install`，下载并校验 `0.6.1` Bridge，备份旧版本后安装到：
+Harness 会调用 `oxygen_not_included_mod_detect` 和 `oxygen_not_included_mod_install`，下载并校验 Bridge，备份旧版本后安装到：
 
 ```text
 %USERPROFILE%\Documents\Klei\OxygenNotIncluded\mods\Local\DoubaoAI
@@ -147,7 +147,7 @@ Harness 会调用 `oxygen_not_included_mod_detect` 和 `oxygen_not_included_mod_
 
 `T` 由 SMAPI 适配器处理。语音键由 Harness 中的 Windows 媒体 Host 全局监听，并且只允许当前已连接的前台游戏进程触发。源码默认值为 `F8`（Virtual-Key `119`）；`Q` 是 `81`，`V` 是 `86`。
 
-`0.6.2` 的一个 Harness profile 只支持一个全局 Push-to-Talk 键，不会按前台游戏自动切换。要在缺氧中使用 Q，可在 profile 的 `cordis.patch.yml` 中覆盖：
+`0.7.1` 的一个 Harness profile 只支持一个全局 Push-to-Talk 键，不会按前台游戏自动切换。要在缺氧中使用 Q，可在 profile 的 `cordis.patch.yml` 中覆盖：
 
 ```yaml
 - id: xiaotangyuan-game

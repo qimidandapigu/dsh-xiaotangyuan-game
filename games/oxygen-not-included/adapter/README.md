@@ -1,7 +1,7 @@
 # Oxygen Not Included Adapter
 
 这是可独立安装、选择性加载的 DeepSeek Harness 插件，不是通用 Harness
-核心的内置模块。当前版本为 `0.1.3`，只有选择《缺氧》的玩家需要下载它。
+核心的内置模块。当前源码版本为 `0.1.4`，只有选择《缺氧》的玩家需要下载它。
 
 它负责：
 
@@ -18,7 +18,7 @@
 %LOCALAPPDATA%\XiaoTangYuan\oni-bridge
 ```
 
-Adapter 负责把游戏进程注册给 Gateway。Harness `0.6.2` 随后把玩家文字和游戏截图一次性交给支持图片输入的 Agent，不再执行“视觉描述 → 对话模型”的第二次模型调用。
+Adapter 负责把游戏进程注册给 Gateway。Harness `0.7.0` 随后把玩家文字和游戏截图一次性交给支持图片输入的 Agent，不再执行“视觉描述 → 对话模型”的第二次模型调用。
 
 安装已发布 Adapter：
 

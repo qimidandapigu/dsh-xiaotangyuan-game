@@ -122,6 +122,12 @@ internal sealed class AudioDevices : IDisposable
     private WaveFileWriter? writer;
     private MemoryStream? recording;
     private int recordingProcessId;
+    private string? recordingId;
+    private int recordingSequence;
+    private WaveOutEvent? streamingOutput;
+    private BufferedWaveProvider? streamingBuffer;
+    private string? playbackId;
+    private Timer? recordingTimeout;
 
     public bool IsRecording
     {
@@ -133,10 +139,14 @@ internal sealed class AudioDevices : IDisposable
 
     public void StartRecording(int processId)
     {
+        this.CancelPlayback();
+        string nextRecordingId;
         lock (this.gate)
         {
             if (this.recorder is not null) return;
             this.recordingProcessId = processId;
+            this.recordingId = nextRecordingId = Guid.NewGuid().ToString("N");
+            this.recordingSequence = 0;
             this.recording = new MemoryStream();
             this.recorder = new WaveInEvent
             {
@@ -148,27 +158,76 @@ internal sealed class AudioDevices : IDisposable
             this.recorder.DataAvailable += this.OnDataAvailable;
             this.recorder.RecordingStopped += this.OnRecordingStopped;
             this.recorder.StartRecording();
+            this.recordingTimeout = new Timer(_ =>
+            {
+                Protocol.Error("录音已达到 30 秒上限，已自动停止");
+                this.StopRecording();
+            }, null, TimeSpan.FromSeconds(30), Timeout.InfiniteTimeSpan);
         }
-        Protocol.Send(new { type = "recording.started", processId });
+        Protocol.Send(new
+        {
+            type = "recording.started",
+            processId,
+            recordingId = nextRecordingId,
+            sampleRate = 16000,
+            bitsPerSample = 16,
+            channels = 1
+        });
     }
 
     public void StopRecording()
     {
-        lock (this.gate) this.recorder?.StopRecording();
+        int processId;
+        string? activeRecordingId;
+        lock (this.gate)
+        {
+            if (this.recorder is null) return;
+            processId = this.recordingProcessId;
+            activeRecordingId = this.recordingId;
+            this.recordingTimeout?.Dispose();
+            this.recordingTimeout = null;
+            this.recorder.StopRecording();
+        }
+        if (activeRecordingId is not null)
+        {
+            Protocol.Send(new { type = "recording.stopped", processId, recordingId = activeRecordingId });
+        }
     }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e)
     {
-        lock (this.gate) this.writer?.Write(e.Buffer, 0, e.BytesRecorded);
+        string? activeRecordingId;
+        int processId;
+        int sequence;
+        byte[] chunk = new byte[e.BytesRecorded];
+        Buffer.BlockCopy(e.Buffer, 0, chunk, 0, e.BytesRecorded);
+        lock (this.gate)
+        {
+            this.writer?.Write(chunk, 0, chunk.Length);
+            activeRecordingId = this.recordingId;
+            processId = this.recordingProcessId;
+            sequence = ++this.recordingSequence;
+        }
+        if (activeRecordingId is null) return;
+        Protocol.Send(new
+        {
+            type = "recording.chunk",
+            processId,
+            recordingId = activeRecordingId,
+            sequence,
+            audioBase64 = Convert.ToBase64String(chunk)
+        });
     }
 
     private void OnRecordingStopped(object? sender, StoppedEventArgs e)
     {
         byte[]? wav = null;
         int processId;
+        string? completedRecordingId;
         lock (this.gate)
         {
             processId = this.recordingProcessId;
+            completedRecordingId = this.recordingId;
             try
             {
                 this.writer?.Dispose();
@@ -186,6 +245,9 @@ internal sealed class AudioDevices : IDisposable
                 this.writer = null;
                 this.recording?.Dispose();
                 this.recording = null;
+                this.recordingId = null;
+                this.recordingTimeout?.Dispose();
+                this.recordingTimeout = null;
             }
         }
 
@@ -194,11 +256,12 @@ internal sealed class AudioDevices : IDisposable
             Protocol.Error($"麦克风录制失败：{e.Exception.Message}");
             return;
         }
-        if (wav is null || wav.Length <= 44) return;
+        if (wav is null || wav.Length <= 44 || completedRecordingId is null) return;
         Protocol.Send(new
         {
             type = "recording.completed",
             processId,
+            recordingId = completedRecordingId,
             mediaType = "audio/wav",
             audioBase64 = Convert.ToBase64String(wav)
         });
@@ -206,6 +269,7 @@ internal sealed class AudioDevices : IDisposable
 
     public async Task PlayAsync(byte[] wav)
     {
+        this.CancelPlayback();
         using var stream = new MemoryStream(wav, writable: false);
         using var reader = new WaveFileReader(stream);
         using var output = new WaveOutEvent();
@@ -220,9 +284,77 @@ internal sealed class AudioDevices : IDisposable
         await stopped.Task.ConfigureAwait(false);
     }
 
+    public void StartPcmPlayback(string nextPlaybackId, int sampleRate, int bitsPerSample, int channels)
+    {
+        if (bitsPerSample != 16 || channels != 1) throw new InvalidOperationException("流式播放当前只支持 PCM16 单声道");
+        this.CancelPlayback();
+        lock (this.gate)
+        {
+            var buffer = new BufferedWaveProvider(new WaveFormat(sampleRate, bitsPerSample, channels))
+            {
+                BufferDuration = TimeSpan.FromSeconds(20),
+                DiscardOnBufferOverflow = true,
+                ReadFully = true
+            };
+            var output = new WaveOutEvent { DesiredLatency = 80, NumberOfBuffers = 3 };
+            output.Init(buffer);
+            this.playbackId = nextPlaybackId;
+            this.streamingBuffer = buffer;
+            this.streamingOutput = output;
+        }
+    }
+
+    public void AppendPcmPlayback(string targetPlaybackId, byte[] pcm)
+    {
+        lock (this.gate)
+        {
+            if (this.playbackId != targetPlaybackId || this.streamingBuffer is null || this.streamingOutput is null) return;
+            this.streamingBuffer.AddSamples(pcm, 0, pcm.Length);
+            if (this.streamingOutput.PlaybackState != PlaybackState.Playing) this.streamingOutput.Play();
+        }
+    }
+
+    public async Task FinishPcmPlaybackAsync(string targetPlaybackId)
+    {
+        while (true)
+        {
+            TimeSpan buffered;
+            lock (this.gate)
+            {
+                if (this.playbackId != targetPlaybackId || this.streamingBuffer is null) return;
+                buffered = this.streamingBuffer.BufferedDuration;
+            }
+            if (buffered <= TimeSpan.FromMilliseconds(20)) break;
+            await Task.Delay(TimeSpan.FromMilliseconds(Math.Min(100, Math.Max(20, buffered.TotalMilliseconds / 2)))).ConfigureAwait(false);
+        }
+        lock (this.gate)
+        {
+            if (this.playbackId == targetPlaybackId) this.DisposeStreamingPlaybackLocked();
+        }
+    }
+
+    public void CancelPlayback(string? targetPlaybackId = null)
+    {
+        lock (this.gate)
+        {
+            if (targetPlaybackId is not null && this.playbackId != targetPlaybackId) return;
+            this.DisposeStreamingPlaybackLocked();
+        }
+    }
+
+    private void DisposeStreamingPlaybackLocked()
+    {
+        this.streamingOutput?.Stop();
+        this.streamingOutput?.Dispose();
+        this.streamingOutput = null;
+        this.streamingBuffer = null;
+        this.playbackId = null;
+    }
+
     public void Dispose()
     {
         this.StopRecording();
+        this.CancelPlayback();
     }
 }
 
@@ -396,7 +528,7 @@ internal static class Program
         WindowCaptureService.EnableDpiAwareness();
         using var audio = new AudioDevices();
         using var hook = new PushToTalkHook(audio);
-        Protocol.Send(new { type = "ready", version = "1.0" });
+        Protocol.Send(new { type = "ready", version = "1.1", capabilities = new[] { "recording.pcm-stream", "playback.pcm-stream", "playback.cancel" } });
 
         string? line;
         while ((line = await Console.In.ReadLineAsync().ConfigureAwait(false)) is not null)
@@ -425,6 +557,37 @@ internal static class Program
                         {
                             if (task.Exception is not null) Protocol.Error($"音频播放失败：{task.Exception.GetBaseException().Message}");
                         }, TaskScheduler.Default);
+                        break;
+                    }
+                    case "play.start":
+                    {
+                        audio.StartPcmPlayback(
+                            parameters.GetProperty("playbackId").GetString() ?? throw new InvalidOperationException("playbackId 不能为空"),
+                            parameters.GetProperty("sampleRate").GetInt32(),
+                            parameters.GetProperty("bitsPerSample").GetInt32(),
+                            parameters.GetProperty("channels").GetInt32());
+                        break;
+                    }
+                    case "play.chunk":
+                    {
+                        string playbackId = parameters.GetProperty("playbackId").GetString() ?? "";
+                        byte[] pcm = Convert.FromBase64String(parameters.GetProperty("audioBase64").GetString() ?? "");
+                        audio.AppendPcmPlayback(playbackId, pcm);
+                        break;
+                    }
+                    case "play.end":
+                    {
+                        string playbackId = parameters.GetProperty("playbackId").GetString() ?? "";
+                        _ = audio.FinishPcmPlaybackAsync(playbackId).ContinueWith(task =>
+                        {
+                            if (task.Exception is not null) Protocol.Error($"流式音频结束失败：{task.Exception.GetBaseException().Message}");
+                        }, TaskScheduler.Default);
+                        break;
+                    }
+                    case "play.cancel":
+                    {
+                        string? playbackId = parameters.TryGetProperty("playbackId", out JsonElement id) ? id.GetString() : null;
+                        audio.CancelPlayback(playbackId);
                         break;
                     }
                     case "capture":

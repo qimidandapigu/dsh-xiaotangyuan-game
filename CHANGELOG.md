@@ -2,7 +2,33 @@
 
 本项目分别发布 Harness 插件和游戏适配器；两条版本线独立递增。
 
-## Harness 插件 0.6.2 - 未发布
+## Harness 插件 0.7.1 - 未发布
+
+- 增加厂商无关的能力注册表，以 `vision.observe`、`speech.transcribe`、`speech.synthesize` 描述需求；ASR 与 TTS 可以独立选择 Provider，并继续复用 DSH 凭据。
+- 松开 Push-to-Talk 后立即发送 `recording.stopped`，游戏马上从“正在听”切换到“正在思考”，不再等待 ASR 返回。
+- 单次录音增加 30 秒自动停止保护，避免系统遗漏 KeyUp 后无限录音。
+- 星露谷 Adapter 在 Gateway 正常关闭时也显示连接错误，避免保留过期状态气泡。
+
+## Harness 插件 0.7.0 - 未发布
+
+- Gateway 升级到协议 `1.1`，游戏通过 `assistant.text.start / delta / done / cancel` 接收真实正文流；`1.0` Adapter 保持兼容。
+- Windows 媒体 Host 在录音期间每 100ms 发送 PCM16 分片，并支持可取消的 PCM 流式播放。
+- ASR 优先使用 WebSocket 实时识别，自动降级到极速单请求，再降级到标准 submit/query。
+- Agent 正文达到句子或安全长度边界后立即排入 TTS，音频分片边返回边播放；玩家再次按键可打断 Agent、TTS 和播放。
+- 增加真实 HTTP chunked TTS 与极速 ASR 单请求测试，补齐中文架构、配置和故障排查说明。
+
+## 缺氧 C# Bridge 0.6.5 / ONI Adapter 0.1.4 - 未发布
+
+- 精灵首次选择并持久记住一个复制人，普通点选不再切换；新增 `oni_companion_follow` 工具，仅在玩家明确命令时更换跟随对象。
+- 精灵尺寸改为依据镜头内游戏格大小计算，镜头缩放时与复制人的相对大小保持稳定。
+- 精灵静止时恢复正面，水平移动显示左/右，上下攀爬均显示背面。
+
+## 饥荒联机版 Mod 0.2.20 - 未发布
+
+- 精灵朝向改为使用 DST 渲染朝向 `AnimState:GetCurrentFacing()`，修复旋转镜头后世界角度与屏幕方向不一致的问题。
+- 将原版 Chester 的实体名称、交互提示和 Mod 配置文案统一显示为“小汤圆”。
+
+## Harness 插件 0.6.3 - 未发布
 
 - 游戏会话改为单次多模态调用：同一个支持图片输入的 Agent 直接接收玩家文字和当前游戏窗口截图并回答。
 - 删除“视觉模型先转文字、再调用对话模型”的串行双模型链路，当前模型提示词不再包含结构化 observation。
@@ -10,6 +36,7 @@
 - ONI Adapter 更新到 `0.1.3`：修复 Windows 桥目录拼接、旧 PID 选择和 WebSocket 连接期异常。
 - ONI C# Bridge 更新到 `0.6.1`：修复横向四帧精灵图被整张压缩显示的问题。
 - 完善缺氧安装、语音、单模型多模态链路和故障排查文档。
+- 主动聊天改由 Harness 统一调度；星露谷、饥荒和缺氧默认在玩家连续 3 分钟没有交互后主动观察画面并说话。
 
 ## Harness 插件 0.6.1 - 未发布
 

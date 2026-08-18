@@ -135,6 +135,16 @@ class ChesterApp:
             self._thinking = status == "thinking"
             self._write_bridge_status(force=True)
             return
+        if method in {"assistant.delta", "assistant.text.delta"}:
+            text = params.get("text")
+            if isinstance(text, str) and text.strip():
+                write_reply(
+                    self.settings.reply_file,
+                    text.strip(),
+                    self._active_recipient_userid,
+                    30.0,
+                )
+            return
         if method == "assistant.present":
             text = params.get("text")
             if isinstance(text, str) and text.strip():

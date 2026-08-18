@@ -13,9 +13,24 @@ export type MediaHostEvent = {
 } | {
   type: 'recording.started'
   processId: number
+  recordingId: string
+  sampleRate: number
+  bitsPerSample: 16
+  channels: 1
+} | {
+  type: 'recording.chunk'
+  processId: number
+  recordingId: string
+  sequence: number
+  audioBase64: string
+} | {
+  type: 'recording.stopped'
+  processId: number
+  recordingId: string
 } | {
   type: 'recording.completed'
   processId: number
+  recordingId: string
   mediaType: string
   audioBase64: string
 } | {
@@ -139,6 +154,23 @@ export class WindowsMediaHost {
   play(audio: BinaryAsset): void {
     if (audio.mediaType !== 'audio/wav') throw new Error(`Windows 媒体服务需要 audio/wav，收到 ${audio.mediaType}`)
     this.send('play', { audioBase64: Buffer.from(audio.bytes).toString('base64') })
+  }
+
+  startPcmPlayback(playbackId: string, sampleRate = 24_000): void {
+    this.send('play.start', { playbackId, sampleRate, bitsPerSample: 16, channels: 1 })
+  }
+
+  appendPcmPlayback(playbackId: string, bytes: Uint8Array): void {
+    if (bytes.byteLength === 0) return
+    this.send('play.chunk', { playbackId, audioBase64: Buffer.from(bytes).toString('base64') })
+  }
+
+  finishPcmPlayback(playbackId: string): void {
+    this.send('play.end', { playbackId })
+  }
+
+  cancelPlayback(playbackId?: string): void {
+    this.send('play.cancel', playbackId === undefined ? {} : { playbackId })
   }
 
   async captureProcessWindow(processId: number, maxWidth: number, signal: AbortSignal): Promise<BinaryAsset> {

@@ -10,8 +10,8 @@ generic Harness package does not depend on it, so other players do not download 
 AI credentials, screenshot capture, ASR, TTS, memory, and model selection belong to
 AIHarness, not to the Mod. The Bridge contains no direct model or speech client.
 
-Current compatible versions are ONI Adapter `0.1.3`, C# Bridge `0.6.1`, and
-Harness plugin `0.6.2`. The Harness sends the player text and current game-window
+Current compatible versions are ONI Adapter `0.1.4`, C# Bridge `0.6.5`, and
+Harness plugin `0.7.0`. The Harness sends the player text and current game-window
 image to one image-capable Agent. It does not run a separate image-to-text model
 before the conversation model, and it currently omits structured ONI observation
 from the model prompt.

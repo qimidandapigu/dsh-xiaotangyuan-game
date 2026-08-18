@@ -8,10 +8,12 @@ namespace DoubaoAI.ONI
     internal static class ConfigManager
     {
         internal static ModConfig Current { get; private set; } = new ModConfig();
+        private static string _currentPath;
 
         internal static ModConfig Load(string contentPath)
         {
             string path = Path.Combine(contentPath, "config.json");
+            _currentPath = path;
             try
             {
                 if (!File.Exists(path))
@@ -30,6 +32,19 @@ namespace DoubaoAI.ONI
             }
 
             return Current;
+        }
+
+        internal static void Save()
+        {
+            if (string.IsNullOrWhiteSpace(_currentPath)) return;
+            try
+            {
+                File.WriteAllText(_currentPath, JsonConvert.SerializeObject(Current, Formatting.Indented));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[DoubaoAI] 保存精灵跟随目标失败：" + ex.Message);
+            }
         }
     }
 }

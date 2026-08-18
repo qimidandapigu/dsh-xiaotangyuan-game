@@ -13,6 +13,8 @@ export interface SpeechConfig {
   synthesisProvider?: string
   credentialRef?: string
   asrResourceId?: string
+  asrFastResourceId?: string
+  asrStreamingResourceId?: string
   ttsResourceId?: string
   ttsVoice?: string
 }
@@ -31,6 +33,11 @@ export interface FeedbackConfig {
   timeoutMs?: number
 }
 
+export interface ProactiveChatConfig {
+  enabled?: boolean
+  intervalSeconds?: number
+}
+
 export interface DontStarveInstallerConfig {
   manifestUrl?: string
   archivePath?: string
@@ -46,6 +53,7 @@ export interface Config {
   vision?: VisionConfig
   speech?: SpeechConfig
   media?: MediaConfig
+  proactiveChat?: ProactiveChatConfig
   feedback?: FeedbackConfig
   installers?: InstallersConfig
 }
@@ -64,6 +72,8 @@ export interface ResolvedConfig {
     synthesisProvider: string
     credentialRef: string
     asrResourceId: string
+    asrFastResourceId: string
+    asrStreamingResourceId: string
     ttsResourceId: string
     ttsVoice: string
   }
@@ -78,6 +88,10 @@ export interface ResolvedConfig {
     clientId: string
     credentialRef: string
     timeoutMs: number
+  }
+  proactiveChat: {
+    enabled: boolean
+    intervalSeconds: number
   }
   installers: {
     dontStarve: {
@@ -111,6 +125,12 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
   const visionMaxWidth = config.vision?.maxWidth ?? 1280
   if (!Number.isInteger(visionMaxWidth) || visionMaxWidth < 320 || visionMaxWidth > 3840) {
     throw new Error('vision.maxWidth must be an integer between 320 and 3840')
+  }
+  const proactiveChatIntervalSeconds = config.proactiveChat?.intervalSeconds ?? 180
+  if (!Number.isInteger(proactiveChatIntervalSeconds)
+    || proactiveChatIntervalSeconds < 60
+    || proactiveChatIntervalSeconds > 3600) {
+    throw new Error('proactiveChat.intervalSeconds must be an integer between 60 and 3600')
   }
 
   const feedbackEnabled = config.feedback?.enabled ?? false
@@ -170,6 +190,8 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
       synthesisProvider: config.speech?.synthesisProvider ?? config.speech?.provider ?? 'auto',
       credentialRef: config.speech?.credentialRef ?? 'VOLCENGINE_API_KEY',
       asrResourceId: config.speech?.asrResourceId ?? 'volc.bigasr.auc',
+      asrFastResourceId: config.speech?.asrFastResourceId ?? 'volc.bigasr.auc_turbo',
+      asrStreamingResourceId: config.speech?.asrStreamingResourceId ?? 'volc.bigasr.sauc.duration',
       ttsResourceId: config.speech?.ttsResourceId ?? 'seed-tts-1.0',
       ttsVoice: config.speech?.ttsVoice ?? 'zh_female_shuangkuaisisi_emo_v2_mars_bigtts',
     },
@@ -184,6 +206,10 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
       clientId: feedbackClientId,
       credentialRef: config.feedback?.credentialRef?.trim() || 'XIAOTANGYUAN_FEEDBACK_TOKEN',
       timeoutMs: feedbackTimeoutMs,
+    },
+    proactiveChat: {
+      enabled: config.proactiveChat?.enabled ?? true,
+      intervalSeconds: proactiveChatIntervalSeconds,
     },
     installers: {
       dontStarve: {

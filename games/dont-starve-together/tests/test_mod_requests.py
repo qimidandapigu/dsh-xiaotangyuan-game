@@ -113,6 +113,18 @@ class ModRequestTests(unittest.TestCase):
             self.assertEqual(payload["text"], "你好")
             self.assertEqual(payload["recipient_userid"], "KU_test")
 
+    def test_harness_delta_notification_updates_streaming_reply(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app, _ = self.make_app(Path(directory))
+            app._active_recipient_userid = "KU_test"
+            app._on_harness_notification(
+                "assistant.delta",
+                {"interactionId": "stream-1", "delta": "好", "text": "你好"},
+            )
+            payload = json.loads(app.settings.reply_file.read_text(encoding="utf-8"))
+            self.assertEqual(payload["text"], "你好")
+            self.assertEqual(payload["recipient_userid"], "KU_test")
+
     def test_bridge_status_identifies_harness_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             app, _ = self.make_app(Path(directory))

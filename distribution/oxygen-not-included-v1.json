@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "tag": "oni-v0.6.1",
-  "version": "0.6.1",
+  "tag": "oni-v0.6.5",
+  "version": "0.6.5",
   "archive": {
-    "name": "dsh-xiaotangyuan-game-oni-0.6.1.zip",
-    "url": "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/oni-v0.6.1/dsh-xiaotangyuan-game-oni-0.6.1.zip",
-    "size": 27581,
-    "sha256": "1ccc51a9f547fe04010cf1581681cbab86e0a18eb69758536d535d866e832468"
+    "name": "dsh-xiaotangyuan-game-oni-0.6.5.zip",
+    "url": "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/oni-v0.6.5/dsh-xiaotangyuan-game-oni-0.6.5.zip",
+    "size": 1249083,
+    "sha256": "7d4190ff0b94805b012d9360dcb0812b696a3d0fcf0d240d2f852a3089a94371"
   }
 }

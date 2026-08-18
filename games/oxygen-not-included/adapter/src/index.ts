@@ -11,7 +11,7 @@ type ObjectValue = Record<string, unknown>
 type BridgeEvent = { id: string, method: string, params: ObjectValue }
 type ToolResult = { success: boolean, reply: string }
 
-const ROLE = '你是住在《缺氧》里的精灵，是玩家傲娇、调皮但可靠的伙伴。使用简洁自然中文，不用 Markdown。需要操作游戏时必须调用 oni_ 开头的工具；只有工具返回 success=true 后才能说动作已经执行。'
+const ROLE = '你是住在《缺氧》里的小汤圆，是玩家傲娇、调皮但可靠的伙伴。使用简洁自然中文，不用 Markdown。需要操作游戏时必须调用 oni_ 开头的工具；只有工具返回 success=true 后才能说动作已经执行。玩家明确要求你改为跟随某个复制人时，调用 oni_companion_follow；不要因为普通选择或提到复制人就切换。'
 
 export const name = 'oni-adapter'
 export const inject = ['tools']
@@ -47,13 +47,17 @@ export class OniAdapter {
     const targetCell = typeof cursor === 'object' && cursor !== null && Number.isInteger((cursor as ObjectValue).cell)
       ? (cursor as ObjectValue).cell
       : undefined
-    if (targetCell === undefined) throw new Error('缺氧 Adapter 尚未收到有效的鼠标格子')
+    if (name !== 'oni_companion_follow' && targetCell === undefined) throw new Error('缺氧 Adapter 尚未收到有效的鼠标格子')
     const callId = randomUUID()
     const promise = new Promise<ToolResult>((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(callId); reject(new Error(`缺氧工具执行超时：${name}`)) }, 15_000)
       this.pending.set(callId, { resolve, reject, timer })
     })
-    this.enqueue('tool.execute', { callId, name, args: { ...args, targetCell } })
+    this.enqueue('tool.execute', {
+      callId,
+      name,
+      args: targetCell === undefined ? { ...args } : { ...args, targetCell },
+    })
     const abort = (): void => {
       const pending = this.pending.get(callId)
       if (pending !== undefined) { clearTimeout(pending.timer); this.pending.delete(callId); pending.reject(new Error('缺氧工具调用已取消')) }
@@ -117,7 +121,7 @@ export class OniAdapter {
   private connect(processId: number): void {
     this.disconnect(); this.processId = processId
     const socket = this.socket = new WebSocket(this.gatewayUrl)
-    socket.on('open', () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: `oni-hello-${processId}`, method: 'adapter.hello', params: { adapterId: 'qimidandapigu.oxygen-not-included-fairy', gameId: 'oxygen-not-included', version: '0.1.3', protocolVersion: '1.0', processId } })))
+    socket.on('open', () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: `oni-hello-${processId}`, method: 'adapter.hello', params: { adapterId: 'qimidandapigu.oxygen-not-included-fairy', gameId: 'oxygen-not-included', version: '0.1.4', protocolVersion: '1.1', capabilities: ['assistant.text-stream'], processId } })))
     socket.on('error', () => { if (this.socket === socket) this.socket = undefined })
     socket.on('close', () => { if (this.socket === socket) this.socket = undefined })
     socket.on('message', raw => {
@@ -174,6 +178,9 @@ export function registerOniTools(ctx: Context, adapter: OniAdapter): void {
   register('oni_dig', 'Create a validated single-cell dig chore at the current ONI cursor cell.', actor)
   register('oni_dig_path', 'Create a validated staged dig path toward the current ONI cursor cell.', actor)
   register('oni_build', 'Build an allowlisted ONI building at the current cursor cell.', { ...actor, buildingKey: { type: 'string', required: true, description: 'One of ladder, tile, outhouse, flush_toilet, wash_basin, bed, research_center, storage_locker, manual_generator.' } })
+  register('oni_companion_follow', 'Change which living duplicant XiaoTangYuan permanently follows. Call only when the player explicitly asks XiaoTangYuan to follow a different duplicant.', {
+    actorId: { type: 'number', required: true, description: 'Exact duplicant id from the current ONI observation.' },
+  })
 }
 
 export function registerOniInstallTools(ctx: Context, installer: OniInstallerConfig): void {

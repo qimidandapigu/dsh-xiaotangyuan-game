@@ -1,7 +1,7 @@
 {
   "name": "dsh-xiaotangyuan-game-workspace",
   "private": true,
-  "version": "0.6.2",
+  "version": "0.7.1",
   "description": "XiaoTangYuan Game AI monorepo.",
   "scripts": {
     "build": "pnpm --filter @qimidandapigu/oni-adapter build && pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game build",

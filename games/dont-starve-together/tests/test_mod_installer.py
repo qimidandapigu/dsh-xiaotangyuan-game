@@ -26,6 +26,28 @@ class ModInstallerTests(unittest.TestCase):
         self.assertIn("if JINGLING_ANIM_AVAILABLE then", modmain)
         self.assertIn("if not JINGLING_ANIM_AVAILABLE", modmain)
 
+    def test_jingling_uses_render_facing_instead_of_world_rotation(self) -> None:
+        modmain = (Path(__file__).parents[1] / "game-mod" / "modmain.lua").read_text(
+            encoding="utf-8"
+        )
+
+        direction_block = modmain.split("local function get_jingling_direction()", 1)[1].split(
+            "local function update_jingling_visual_mode()", 1
+        )[0]
+        self.assertIn("inst.AnimState:GetCurrentFacing()", direction_block)
+        self.assertIn("GLOBAL.FACING_UPLEFT", direction_block)
+        self.assertIn("GLOBAL.FACING_DOWNRIGHT", direction_block)
+        self.assertNotIn("Transform:GetRotation()", direction_block)
+
+    def test_companion_is_presented_as_xiaotangyuan(self) -> None:
+        mod_root = Path(__file__).parents[1] / "game-mod"
+        modmain = (mod_root / "modmain.lua").read_text(encoding="utf-8")
+        modinfo = (mod_root / "modinfo.lua").read_text(encoding="utf-8")
+
+        self.assertIn('GLOBAL.STRINGS.NAMES.CHESTER = "小汤圆"', modmain)
+        self.assertIn('inst.name = "小汤圆"', modmain)
+        self.assertIn('label = "小汤圆格数"', modinfo)
+
     def test_enables_local_mod_only_once(self) -> None:
         first = enable_modsettings("-- settings\n")
         second = enable_modsettings(first)

@@ -19,16 +19,30 @@ Agent、视觉、ASR、TTS、工具、安装器、媒体 Host
 
 | 组件 | 版本 | 状态与说明 |
 |---|---:|---|
-| Harness 插件 | `0.6.2` | 当前源码版本；单次多模态 Agent、媒体 Host、星露谷/饥荒安装器和自动反馈 |
+| Harness 插件 | `0.7.1` | 当前源码版本；真实文字流、流式 ASR/TTS、松键状态与超时保护、可打断播放和安装器 |
 | 最新公开 Harness Release | `0.5.1` | 已发布稳定版，只包含此前的星露谷链路 |
 | 星露谷适配器 | `0.5.0` | SMAPI 薄桥接与小汤圆外观包 |
-| 饥荒联机版 Mod | `0.2.18` | Lua Mod、轻量 Python Adapter 与 Jingling 动画 |
-| 缺氧 Adapter | `0.1.3` | 可选 Harness 插件；游戏专属动作、知识与安装器不进入通用包 |
-| 缺氧 C# Bridge | `0.6.1` | 游戏观察、动作执行、文件桥与精灵 UI |
+| 饥荒联机版 Mod | `0.2.20` | Lua Mod、轻量 Python Adapter 与 Jingling 动画 |
+| 缺氧 Adapter | `0.1.4` | 可选 Harness 插件；游戏专属动作、知识与安装器不进入通用包 |
+| 缺氧 C# Bridge | `0.6.5` | 游戏观察、动作执行、文件桥与固定复制人跟随精灵 UI |
 | Content Patcher | `2.9.1` | 官方第三方资源加载组件 |
 | TrinketTinker | `1.9.0` | 官方第三方宠物跟随与渲染组件 |
 
 Harness 插件和游戏包独立发版，所以版本号不要求完全相同。仓库版本不等于已公开 Release；发布前不要把尚未存在的 Release URL 当成安装入口。
+
+## 多模态能力路由
+
+小汤圆依赖的是能力，不绑定某一家模型厂商：
+
+```text
+vision.observe       看当前游戏窗口
+speech.transcribe    把玩家语音转成文字
+speech.synthesize    把 Agent 回复合成为语音
+```
+
+游戏 Agent、视觉、ASR 和 TTS 可以由不同实现提供。插件通过能力注册表自动选择已经就绪的实现，也允许分别指定语音识别和语音合成 Provider；新增 Provider 不需要修改任何游戏 Adapter 或 Bridge。
+
+云端凭据统一由 DeepSeek Harness 管理。小汤圆配置只保存 `credentialRef` 等凭据名称，在每次调用开始时向 DSH 解析，不在插件配置、游戏目录或协议消息中保存真实 Key。视觉模型必须在 DSH 中声明支持图片输入；当前内置语音实现仍是火山引擎，但能力接口本身不依赖火山、智谱或其他特定厂商。
 
 ## 快速开始
 
@@ -44,7 +58,7 @@ dsh plugin --profile web add "https://github.com/qimidandapigu/dsh-xiaotangyuan-
 小汤圆，帮我检测并安装星露谷物语的 AI MOD
 ```
 
-当前 `0.6.2` 开发版需要从本仓库构建并安装生成的 `.tgz`；完成对应 Release 后再切换为公开下载地址。安装 `0.6.1` 或更新版本后才可以使用饥荒安装指令：
+当前 `0.7.1` 开发版需要从本仓库构建并安装生成的 `.tgz`；完成对应 Release 后再切换为公开下载地址。安装 `0.6.1` 或更新版本后才可以使用饥荒安装指令：
 
 ```text
 检测并安装《饥荒联机版》的小汤圆 AI Mod
@@ -101,6 +115,7 @@ distribution/
   dont-starve-together-v1.json  饥荒安装包固定来源与校验值
   oxygen-not-included-v1.json  缺氧安装包固定来源与校验值
 docs/                        中文安装、排错、架构与开发文档
+tools/                       跨游戏小汤圆素材生成工具
 ```
 
 星露谷、饥荒和缺氧源码都在本仓库统一维护；游戏发布包仍与 Harness 插件独立发版。以后新增游戏不重复开发模型调用、语音、记忆或媒体基础设施；只有真正依赖游戏 API 的知识和动作进入可选 Adapter。
@@ -110,6 +125,7 @@ docs/                        中文安装、排错、架构与开发文档
 - [安装与升级](docs/INSTALLATION.md)
 - [常见问题与排错](docs/TROUBLESHOOTING.md)
 - [架构和职责边界](docs/ARCHITECTURE.md)
+- [结构化状态与记忆隔离设计](docs/CONTEXT_AND_MEMORY_DESIGN.md)
 - [开发与发布](docs/DEVELOPMENT.md)
 - [更新记录](CHANGELOG.md)
 - [星露谷适配器](games/stardew-valley/README.md)
