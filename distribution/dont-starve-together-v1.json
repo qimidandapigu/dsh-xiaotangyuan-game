@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "tag": "dont-starve-v0.2.20",
-  "version": "0.2.20",
+  "tag": "dont-starve-v0.2.21",
+  "version": "0.2.21",
   "archive": {
-    "name": "dsh-xiaotangyuan-game-dont-starve-0.2.20.zip",
-    "url": "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/dont-starve-v0.2.20/dsh-xiaotangyuan-game-dont-starve-0.2.20.zip",
-    "size": 16003630,
-    "sha256": "96857fe4b1aae35ea65c2970f955f2931e9fca64885b33fdfee782fc85f77332"
+    "name": "dsh-xiaotangyuan-game-dont-starve-0.2.21.zip",
+    "url": "https://github.com/qimidandapigu/dsh-xiaotangyuan-game/releases/download/dont-starve-v0.2.21/dsh-xiaotangyuan-game-dont-starve-0.2.21.zip",
+    "size": 16004388,
+    "sha256": "b0a5cec41cdfba65de8f2151251466cf95f1ef82f6927871b1361d56142f4821"
   }
 }

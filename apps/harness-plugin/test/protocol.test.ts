@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readGameRetry } from '../src/protocol/game.js'
+import { readAdapterHello, readGameRetry } from '../src/protocol/game.js'
 import { failure, parseRpcRequest, success } from '../src/protocol/json-rpc.js'
 
 describe('JSON-RPC protocol', () => {
@@ -28,5 +28,14 @@ describe('JSON-RPC protocol', () => {
     expect(readGameRetry({ context: { playerName: 'Wilson', observation: { day: 3 } } })).toMatchObject({
       context: { playerName: 'Wilson', observation: { day: 3 } },
     })
+  })
+
+  it('accepts opaque save identities and rejects local paths', () => {
+    expect(readAdapterHello({
+      adapterId: 'test', gameId: 'test-game', version: '1', protocolVersion: '1.1', saveId: 'save_01-ab',
+    }).saveId).toBe('save_01-ab')
+    expect(() => readAdapterHello({
+      adapterId: 'test', gameId: 'test-game', version: '1', protocolVersion: '1.1', saveId: 'C:\\Users\\player\\save',
+    })).toThrow('saveId')
   })
 })

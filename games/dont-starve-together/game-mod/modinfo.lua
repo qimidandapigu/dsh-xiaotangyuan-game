@@ -1,7 +1,7 @@
 name = "Don't Starve AI Mod"
 description = "按 V 通过 DeepSeek Harness 与小汤圆对话。"
 author = "Don't Starve AI Mod contributors"
-version = "0.2.20"
+version = "0.2.21"
 
 api_version = 10
 dst_compatible = true

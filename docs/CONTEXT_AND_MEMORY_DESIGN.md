@@ -1,6 +1,6 @@
 # 结构化状态与记忆隔离设计
 
-本文定义后续实现边界，不表示当前版本已经启用结构化状态注入或持久记忆。目标是让模型获得少量真正有用的事实，同时确保原始世界状态留在本机、不同游戏和存档的记忆不会串线。
+本文同时记录设计边界和当前实现状态。`0.7.4` 已启用持久记忆、后台自动提取及 `gameId + saveId` 隔离；结构化 `modelContext` 白名单和玩家管理界面仍是后续工作。目标是让模型获得少量真正有用的事实，同时确保原始世界状态留在本机、不同游戏和存档的记忆不会串线。
 
 ## 设计总览
 
@@ -119,7 +119,7 @@ Harness 在接收时执行统一限制：
 
 ### 1. 存放位置
 
-当前版本还没有实现这两个长期记忆库，只有 DSH Session 保存的当前会话历史。后续由“小汤圆游戏 AI”Harness 插件在自己的隔离数据目录维护一个 SQLite 数据库。优先使用 DSH 提供的当前 profile 插件数据目录；如果该接口不稳定，则使用 `%LOCALAPPDATA%\XiaoTangYuan\profiles\<dsh-profile>\memory-v1.sqlite`。Adapter、游戏 Mod 和云端模型都不直接读写文件。
+“小汤圆游戏 AI”Harness 插件在自己的隔离数据目录维护 SQLite 数据库，默认路径是 `%LOCALAPPDATA%\XiaoTangYuan\profiles\<profileId>\memory-v1.sqlite`。Adapter、游戏 Mod 和云端模型都不直接读写该文件。插件复用 Harness 的当前模型选择和 LLM 流式接口做后台提取，但不注册全局 Prompt，也不修改普通 Harness Session。
 
 这里的“共同记忆”只在小汤圆支持的游戏之间共享，不是 DSH 的全局用户记忆。插件不能注册全局 Prompt 注入器，也不能修改普通 Harness 对话的 Session。只有已经通过 `adapter.hello` 建立的游戏连接，在创建专属 `GameAgentSession`、处理 `chat.send` 或游戏语音时，才读取并注入当前玩家的共同 Profile 和当前 `gameId + saveId` 记忆。
 
@@ -133,7 +133,7 @@ Harness 在接收时执行统一限制：
      └─ 当前 gameId + saveId 的游戏事件
 ```
 
-插件空闲时不执行记忆检索或后台模型调用。记忆提取只在一轮游戏回答完成后运行，因此不会增加普通 Harness 对话的 Prompt token 和响应时间。多个 DSH profile 使用不同数据库；同一台电脑需要多人完全隔离时，让玩家使用不同 DSH profile 即可。
+插件空闲时不执行记忆检索或后台模型调用。记忆提取只在一轮游戏回答完成后运行，因此不会增加普通 Harness 对话的 Prompt token 和响应时间。同一台电脑需要多人完全隔离时，应为各自的插件配置使用不同 `memory.profileId`；未来 Harness 提供稳定的 profile 数据目录接口后可改为自动映射。
 
 DeepSeek Harness 仍处于 Developer Preview，可能发生破坏性 API 变化，因此数据库通过项目自己的 `MemoryStore` 接口访问，不绑定 DSH 内部 Session 表。数据库只有两种业务记录：
 
@@ -161,12 +161,12 @@ DeepSeek Harness 仍处于 Developer Preview，可能发生破坏性 API 变化�
 不能把整个数据库塞进 Prompt。每轮固定使用：
 
 - 共同 Profile：始终读取，最多约 `300 tokens`。
-- 当前存档的活动目标：最多 `3` 条。
+- 当前存档的活动目标：最多 `2` 条。
 - 与玩家问题、画面焦点或附近实体相关的事件：最多 `4` 条。
 - 最近且重要的补充事件：最多 `2` 条。
-- 全部长期记忆合计硬上限约 `900 tokens`。
+- 全部长期记忆合计当前按 `1,200` 字符硬裁剪，目标约为几百 tokens；后续可接入统一 tokenizer 做更精确预算。
 
-游戏事件按“相关性 + 最近使用时间 + 重要度”排序。第一版使用 SQLite FTS5/BM25 和结构化过滤即可，不引入向量数据库；检索永远限定在当前 `gameId + saveId`，共同 Profile 也不会参与跨库相似度搜索。
+游戏事件按“相关性 + 最近使用时间 + 重要度”排序。当前第一版使用轻量词项匹配和结构化过滤，不引入向量数据库；检索永远限定在当前 `gameId + saveId`，共同 Profile 也不会参与跨库相似度搜索。数据量增长后可透明升级到 SQLite FTS5/BM25。
 
 低价值的每帧观察、普通闲聊和可以从当前结构化状态重新得到的信息不保存。每个存档设置软上限，例如 `300` 条；超过后只在后台合并已结束的低重要度事件，活动目标和玩家明确要求记住的内容不自动删除。
 

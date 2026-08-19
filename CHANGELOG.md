@@ -2,6 +2,15 @@
 
 本项目分别发布 Harness 插件和游戏适配器；两条版本线独立递增。
 
+## Harness 插件 0.7.5 / 星露谷适配器 0.5.1 / 饥荒联机版 Mod 0.2.21 - 未发布
+
+- 增加小汤圆专属长期记忆：共同玩家偏好可跨游戏复用，游戏经历按 `gameId + saveId` 隔离，本地 SQLite 保存并在回复后后台提取。
+- 星露谷、饥荒和缺氧 Adapter 现在传递经过散列或安全处理的存档标识，避免跨存档串记忆，也不暴露本地路径和平台账号。
+- 增加 Adapter 主动录音控制协议 `voice.start` / `voice.stop`，录音、ASR、Agent 和 TTS 仍由 Harness 统一实现。
+- 饥荒联机版的 V 键现在真正启动和停止 Harness 麦克风，不再只切换“正在听/正在思考”状态，也不再依赖全局语音键配置。
+- 停止录音时校验发起 Adapter 的游戏进程，避免一个游戏意外终止另一个游戏的录音。
+- 修正火山引擎流式 ASR 音频序号和提前失败时的未处理 Promise；过短录音会明确取消并提示玩家重新说话。
+
 ## Harness 插件 0.7.1 - 未发布
 
 - 增加厂商无关的能力注册表，以 `vision.observe`、`speech.transcribe`、`speech.synthesize` 描述需求；ASR 与 TTS 可以独立选择 Provider，并继续复用 DSH 凭据。

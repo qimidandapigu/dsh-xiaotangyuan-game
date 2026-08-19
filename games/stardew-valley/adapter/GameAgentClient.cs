@@ -16,6 +16,7 @@ internal sealed class GameAgentClient : IAsyncDisposable
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonDocument>> pending = new();
     private ClientWebSocket? socket;
     private CancellationTokenSource? connectionLifetime;
+    private string? saveId;
     private long nextRequestId;
 
     public event Action<string>? AssistantPresented;
@@ -28,6 +29,14 @@ internal sealed class GameAgentClient : IAsyncDisposable
         this.gatewayUri = new Uri(gatewayUrl, UriKind.Absolute);
         if (this.gatewayUri.Scheme is not "ws" and not "wss")
             throw new ArgumentException("GatewayUrl must use ws:// or wss://.", nameof(gatewayUrl));
+    }
+
+    public void SetSaveId(string? value)
+    {
+        value = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (string.Equals(this.saveId, value, StringComparison.Ordinal)) return;
+        this.saveId = value;
+        this.ResetConnection();
     }
 
     public async Task<string> SendChatAsync(string text, object context, CancellationToken cancellationToken)
@@ -90,7 +99,8 @@ internal sealed class GameAgentClient : IAsyncDisposable
                     version = "0.3.0",
                     protocolVersion = "1.1",
                     capabilities = new[] { "assistant.text-stream" },
-                    processId = Environment.ProcessId
+                    processId = Environment.ProcessId,
+                    saveId = this.saveId
                 },
                 cancellationToken
             ).ConfigureAwait(false);
@@ -218,6 +228,9 @@ internal sealed class GameAgentClient : IAsyncDisposable
         JsonElement parameters = root.TryGetProperty("params", out JsonElement value) ? value : default;
         switch (method)
         {
+            case "gateway.ready":
+                this.AssistantStatusChanged?.Invoke("ready", null);
+                break;
             case "assistant.delta":
             case "assistant.text.delta":
                 if (parameters.TryGetProperty("text", out JsonElement partialText))

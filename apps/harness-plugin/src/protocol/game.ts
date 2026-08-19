@@ -4,6 +4,7 @@ export interface AdapterHello {
   version: string
   protocolVersion: string
   processId?: number
+  saveId?: string
   capabilities?: string[]
 }
 
@@ -14,6 +15,7 @@ export interface GameChatContext {
   date?: string
   time?: string
   nearbyNpc?: string
+  saveId?: string
   observation?: Record<string, unknown>
 }
 
@@ -54,6 +56,10 @@ export function readAdapterHello(value: unknown): AdapterHello {
   if (capabilities !== undefined && (!Array.isArray(capabilities) || capabilities.some(value => typeof value !== 'string'))) {
     throw new Error('capabilities must be an array of strings when provided')
   }
+  const saveId = optionalString(params, 'saveId')
+  if (saveId !== undefined && (!/^[a-zA-Z0-9._:-]{1,128}$/.test(saveId))) {
+    throw new Error('saveId must contain 1-128 safe opaque identifier characters')
+  }
   return params as unknown as AdapterHello
 }
 
@@ -74,6 +80,14 @@ function limitedOptionalString(record: Record<string, unknown>, key: string, max
   return value
 }
 
+function optionalOpaqueId(record: Record<string, unknown>, key: string): string | undefined {
+  const value = limitedOptionalString(record, key, 128)
+  if (value !== undefined && !/^[a-zA-Z0-9._:-]+$/.test(value)) {
+    throw new Error(`${key} must contain only safe opaque identifier characters`)
+  }
+  return value
+}
+
 export function readGameRetry(value: unknown): GameRetryRequest {
   const params = asRecord(value)
   const context = readContext(params.context)
@@ -90,6 +104,7 @@ function readContext(value: unknown): GameChatContext | undefined {
     date: optionalString(source, 'date'),
     time: optionalString(source, 'time'),
     nearbyNpc: optionalString(source, 'nearbyNpc'),
+    saveId: optionalOpaqueId(source, 'saveId'),
     ...(source.observation === undefined ? {} : { observation: asRecord(source.observation) }),
   }
 }

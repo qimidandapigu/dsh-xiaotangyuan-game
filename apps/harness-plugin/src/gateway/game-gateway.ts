@@ -13,6 +13,7 @@ import { GameAgentSession } from '../runtime/agent/game-agent-session.js'
 import { MultimodalRouter } from '../runtime/multimodal/multimodal-router.js'
 import type { VoiceInteractionHandler } from '../runtime/speech/speech-controller.js'
 import type { ResolvedConfig } from '../config.js'
+import type { MemoryService } from '../runtime/memory/memory-service.js'
 
 interface ConnectionState {
   socket: WebSocket
@@ -43,12 +44,15 @@ export class GameGateway implements VoiceInteractionHandler {
     host: string,
     port: number,
     private readonly multimodal: MultimodalRouter,
+    private readonly memory: MemoryService | undefined,
     private readonly proactiveChat: ResolvedConfig['proactiveChat'],
     private readonly processTargetsChanged: (processIds: readonly number[]) => void,
     private readonly feedbackEnabled: boolean,
     private readonly speak: (text: string, signal: AbortSignal) => Promise<void>,
     private readonly appendSpeechDelta: (processId: number, interactionId: string, delta: string) => Promise<void>,
     private readonly finishSpeechReply: (processId: number, interactionId: string, finalText: string) => Promise<boolean>,
+    private readonly startRecording: (processId: number) => boolean = () => false,
+    private readonly stopRecording: (processId: number) => boolean = () => false,
   ) {
     this.server = new WebSocketServer({ host, port, maxPayload: 1024 * 1024 })
     this.server.on('connection', socket => this.onConnection(socket))
@@ -133,10 +137,12 @@ export class GameGateway implements VoiceInteractionHandler {
       case 'adapter.hello': {
         if (state.session !== undefined) throw new Error('adapter.hello may only be sent once per connection')
         state.adapter = readAdapterHello(request.params)
+        this.memory?.adapterConnected(state.adapter)
         state.session = new GameAgentSession(
           this.ctx,
           state.adapter,
           this.multimodal,
+          this.memory,
           this.feedbackEnabled,
           update => {
             if (!state.streamingInteractions.has(update.interactionId)) {
@@ -196,6 +202,18 @@ export class GameGateway implements VoiceInteractionHandler {
       case 'state.update':
         state.latestObservation = readStateUpdate(request.params)
         return { accepted: true }
+      case 'voice.start': {
+        const processId = state.adapter?.processId
+        if (processId === undefined) throw new Error('adapter.hello must provide processId before voice.start')
+        if (!this.startRecording(processId)) throw new Error('Windows 媒体服务尚未启动')
+        return { accepted: true }
+      }
+      case 'voice.stop': {
+        const processId = state.adapter?.processId
+        if (processId === undefined) throw new Error('adapter.hello must provide processId before voice.stop')
+        if (!this.stopRecording(processId)) throw new Error('Windows 媒体服务尚未启动')
+        return { accepted: true }
+      }
       default:
         throw new Error(`unknown method: ${request.method}`)
     }

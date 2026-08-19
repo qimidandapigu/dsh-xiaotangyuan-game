@@ -1,7 +1,7 @@
 {
   "Name": "XiaoTangYuan Game AI - Stardew Valley",
   "Author": "qimidandapigu",
-  "Version": "0.5.0",
+  "Version": "0.5.1",
   "Description": "Thin Stardew Valley AI adapter using Content Patcher and TrinketTinker for companion presentation.",
   "UniqueID": "qimidandapigu.StardewAgent",
   "EntryDll": "StardewAgentMod.dll",

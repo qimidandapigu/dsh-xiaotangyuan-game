@@ -17,6 +17,11 @@
         proactiveChat:
           enabled: true
           intervalSeconds: 180
+        memory:
+          enabled: true
+          autoLearn: true
+          profileId: default
+          maxGameEntries: 300
         installers:
           dontStarve:
             manifestUrl: https://raw.githubusercontent.com/qimidandapigu/dsh-xiaotangyuan-game/main/distribution/dont-starve-together-v1.json

@@ -117,6 +117,7 @@ internal static class WindowCaptureService
 
 internal sealed class AudioDevices : IDisposable
 {
+    private const int MinimumRecordingBytes = 44 + (16000 * 2 * 3 / 10);
     private readonly object gate = new();
     private WaveInEvent? recorder;
     private WaveFileWriter? writer;
@@ -175,13 +176,14 @@ internal sealed class AudioDevices : IDisposable
         });
     }
 
-    public void StopRecording()
+    public void StopRecording(int? expectedProcessId = null)
     {
         int processId;
         string? activeRecordingId;
         lock (this.gate)
         {
             if (this.recorder is null) return;
+            if (expectedProcessId is not null && this.recordingProcessId != expectedProcessId.Value) return;
             processId = this.recordingProcessId;
             activeRecordingId = this.recordingId;
             this.recordingTimeout?.Dispose();
@@ -256,7 +258,18 @@ internal sealed class AudioDevices : IDisposable
             Protocol.Error($"麦克风录制失败：{e.Exception.Message}");
             return;
         }
-        if (wav is null || wav.Length <= 44 || completedRecordingId is null) return;
+        if (completedRecordingId is null) return;
+        if (wav is null || wav.Length < MinimumRecordingBytes)
+        {
+            Protocol.Send(new
+            {
+                type = "recording.cancelled",
+                processId,
+                recordingId = completedRecordingId,
+                message = "录音太短，请按住语音键说话至少 1 秒再松开。"
+            });
+            return;
+        }
         Protocol.Send(new
         {
             type = "recording.completed",
@@ -548,6 +561,18 @@ internal static class Program
                         int[] processIds = parameters.GetProperty("processIds").EnumerateArray()
                             .Select(item => item.GetInt32()).ToArray();
                         hook.Configure(processIds, key);
+                        break;
+                    }
+                    case "recording.start":
+                    {
+                        int processId = parameters.GetProperty("processId").GetInt32();
+                        audio.StartRecording(processId);
+                        break;
+                    }
+                    case "recording.stop":
+                    {
+                        int processId = parameters.GetProperty("processId").GetInt32();
+                        audio.StopRecording(processId);
                         break;
                     }
                     case "play":

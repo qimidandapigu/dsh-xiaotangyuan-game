@@ -22,6 +22,7 @@ export class OniAdapter {
   private readonly pending = new Map<string, { resolve: (value: ToolResult) => void, reject: (error: Error) => void, timer: ReturnType<typeof setTimeout> }>()
   private socket?: WebSocket
   private processId?: number
+  private saveId?: string
   private directory?: string
   private observation?: ObjectValue
   private timer?: ReturnType<typeof setInterval>
@@ -68,7 +69,7 @@ export class OniAdapter {
 
   private poll(): void {
     if (!existsSync(this.root)) return
-    const candidates: Array<{ directory: string, processId: number, modifiedAt: number }> = []
+    const candidates: Array<{ directory: string, processId: number, saveId: string, modifiedAt: number }> = []
     for (const entry of readdirSync(this.root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const directory = join(this.root, entry.name)
@@ -77,19 +78,23 @@ export class OniAdapter {
       const pid = session?.processId
       if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) continue
       if (!this.processAlive(pid)) continue
-      candidates.push({ directory, processId: pid, modifiedAt: statSync(sessionPath).mtimeMs })
+      const saveId = typeof session?.saveId === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(session.saveId)
+        ? session.saveId
+        : 'default'
+      candidates.push({ directory, processId: pid, saveId, modifiedAt: statSync(sessionPath).mtimeMs })
     }
     const selected = candidates.sort((left, right) => right.modifiedAt - left.modifiedAt)[0]
     if (selected === undefined) {
       this.directory = undefined
       this.observation = undefined
       this.processId = undefined
+      this.saveId = undefined
       this.disconnect()
       return
     }
     this.directory = selected.directory
     const state = this.socket?.readyState
-    if (this.processId !== selected.processId || (state !== WebSocket.OPEN && state !== WebSocket.CONNECTING)) this.connect(selected.processId)
+    if (this.processId !== selected.processId || this.saveId !== selected.saveId || (state !== WebSocket.OPEN && state !== WebSocket.CONNECTING)) this.connect(selected.processId, selected.saveId)
     const events = this.read(join(selected.directory, 'outbox.json'))?.events
     if (Array.isArray(events)) for (const raw of events) this.consume(raw)
     this.flushInbox()
@@ -118,10 +123,10 @@ export class OniAdapter {
     this.forward(event)
   }
 
-  private connect(processId: number): void {
-    this.disconnect(); this.processId = processId
+  private connect(processId: number, saveId: string): void {
+    this.disconnect(); this.processId = processId; this.saveId = saveId
     const socket = this.socket = new WebSocket(this.gatewayUrl)
-    socket.on('open', () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: `oni-hello-${processId}`, method: 'adapter.hello', params: { adapterId: 'qimidandapigu.oxygen-not-included-fairy', gameId: 'oxygen-not-included', version: '0.1.4', protocolVersion: '1.1', capabilities: ['assistant.text-stream'], processId } })))
+    socket.on('open', () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: `oni-hello-${processId}`, method: 'adapter.hello', params: { adapterId: 'qimidandapigu.oxygen-not-included-fairy', gameId: 'oxygen-not-included', version: '0.1.4', protocolVersion: '1.1', capabilities: ['assistant.text-stream'], processId, saveId } })))
     socket.on('error', () => { if (this.socket === socket) this.socket = undefined })
     socket.on('close', () => { if (this.socket === socket) this.socket = undefined })
     socket.on('message', raw => {

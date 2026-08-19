@@ -34,6 +34,11 @@ export type MediaHostEvent = {
   mediaType: string
   audioBase64: string
 } | {
+  type: 'recording.cancelled'
+  processId: number
+  recordingId: string
+  message: string
+} | {
   type: 'capture.completed'
   requestId: string
   processId: number
@@ -149,6 +154,16 @@ export class WindowsMediaHost {
       processIds: [...processIds],
       pushToTalkVirtualKey: this.config.pushToTalkVirtualKey,
     })
+  }
+
+  startRecording(processId: number): boolean {
+    if (!Number.isInteger(processId) || processId <= 0) throw new Error('游戏 Adapter 没有提供有效的进程 ID')
+    return this.send('recording.start', { processId })
+  }
+
+  stopRecording(processId: number): boolean {
+    if (!Number.isInteger(processId) || processId <= 0) throw new Error('游戏 Adapter 没有提供有效的进程 ID')
+    return this.send('recording.stop', { processId })
   }
 
   play(audio: BinaryAsset): void {

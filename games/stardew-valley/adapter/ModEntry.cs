@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Concurrent;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using StardewModdingAPI;
@@ -33,7 +36,11 @@ public sealed class ModEntry : Mod
         this.client.AssistantPresented += text => this.mainThreadActions.Enqueue(() => this.speechBubble.Show(text));
         this.client.AssistantStatusChanged += (status, transcript) => this.mainThreadActions.Enqueue(() =>
         {
-            if (status == "recording")
+            if (status == "ready")
+            {
+                this.speechBubble.Clear();
+            }
+            else if (status == "recording")
             {
                 this.speechBubble.ShowStatus("正在听……");
                 Game1.addHUDMessage(new HUDMessage("小汤圆正在听……", HUDMessage.newQuest_type));
@@ -157,6 +164,10 @@ public sealed class ModEntry : Mod
 
     private void OnSaveLoaded(object? sender, SaveLoadedEventArgs e)
     {
+        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(
+            Game1.uniqueIDForThisGame.ToString(CultureInfo.InvariantCulture)
+        ));
+        this.client.SetSaveId(Convert.ToHexString(digest).ToLowerInvariant());
         this.companion.ApplyEnabled(this.config.ShowCompanion);
     }
 
@@ -167,6 +178,7 @@ public sealed class ModEntry : Mod
 
     private void OnReturnedToTitle(object? sender, ReturnedToTitleEventArgs e)
     {
+        this.client.SetSaveId(null);
         this.textRequestInFlight = false;
         this.observationInFlight = false;
         this.latestObservation = null;

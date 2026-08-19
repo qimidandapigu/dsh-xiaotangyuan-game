@@ -230,6 +230,13 @@ export class SpeechController {
       this.handler.recordingStopped(event.processId)
       return
     }
+    if (event.type === 'recording.cancelled') {
+      const live = this.recordings.get(event.recordingId)
+      this.recordings.delete(event.recordingId)
+      live?.controller.abort(new Error(event.message))
+      this.handler.failed(event.processId, event.message)
+      return
+    }
     if (event.type !== 'recording.completed') return
 
     this.active.add(event.processId)

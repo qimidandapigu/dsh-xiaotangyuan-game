@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import threading
@@ -55,6 +56,11 @@ def build_chat_context(state: dict[str, object] | None) -> dict[str, object]:
     if state is None:
         return context
     context["observation"] = state
+    raw_save_id = state.get("save_id")
+    if isinstance(raw_save_id, str) and raw_save_id.strip():
+        context["saveId"] = hashlib.sha256(
+            ("dst:" + raw_save_id.strip()).encode("utf-8")
+        ).hexdigest()
     player = state.get("player")
     if isinstance(player, dict):
         name = player.get("name")
@@ -355,13 +361,21 @@ class ChesterApp:
         recipient = self._recipient_userid(request)
         if action == "start_recording":
             self._active_recipient_userid = recipient
-            self._recording = True
             self._publish_state(request_state)
+            self._gateway.call(
+                "voice.start",
+                {},
+                self.settings.connection_timeout_seconds,
+            )
             return
         if action == "stop_recording":
             self._active_recipient_userid = recipient
-            self._recording = False
             self._publish_state(request_state)
+            self._gateway.call(
+                "voice.stop",
+                {},
+                self.settings.connection_timeout_seconds,
+            )
             return
         if action == "retry_last":
             if self._busy.locked():

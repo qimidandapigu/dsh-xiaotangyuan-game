@@ -86,8 +86,10 @@ function parseAsrResponse(data: RawData): { text?: string, final: boolean, error
   }
 }
 
-class VolcengineStreamingRecognitionSession implements StreamingRecognitionSession {
-  private sequence = 0
+export class VolcengineStreamingRecognitionSession implements StreamingRecognitionSession {
+  // The initial full-client request occupies the server-assigned sequence 1,
+  // even though that packet doesn't carry an explicit sequence field.
+  private sequence = 1
   private latest = ''
   private settled = false
   private readonly finalText: Promise<string>
@@ -103,6 +105,10 @@ class VolcengineStreamingRecognitionSession implements StreamingRecognitionSessi
       this.resolveFinal = resolve
       this.rejectFinal = reject
     })
+    // A server error can arrive before recording finishes and before finish()
+    // has attached its await handler. Mark the promise handled immediately so
+    // one failed voice turn can never become a process-level rejection.
+    void this.finalText.catch(() => undefined)
     socket.on('message', data => {
       try {
         const response = parseAsrResponse(data)

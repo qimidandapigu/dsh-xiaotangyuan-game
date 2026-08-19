@@ -61,7 +61,7 @@ class ModRequestTests(unittest.TestCase):
             )
             self.assertEqual(app._read_mod_requests(app.settings.request_file)[0]["action"], "start_recording")
 
-    def test_start_and_stop_publish_state_instead_of_recording_locally(self) -> None:
+    def test_start_and_stop_publish_state_and_control_harness_recording(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             app, gateway = self.make_app(Path(directory))
             state = {"player": {"name": "Wilson"}}
@@ -74,6 +74,13 @@ class ModRequestTests(unittest.TestCase):
                 [
                     ("state.update", {"observation": state}),
                     ("state.update", {"observation": state}),
+                ],
+            )
+            self.assertEqual(
+                gateway.calls,
+                [
+                    ("voice.start", {}),
+                    ("voice.stop", {}),
                 ],
             )
 
@@ -137,6 +144,7 @@ class ModRequestTests(unittest.TestCase):
     def test_builds_structured_harness_context(self) -> None:
         context = build_chat_context(
             {
+                "save_id": "KU_world_session",
                 "player": {"name": "Wilson"},
                 "world": {"cycles": 4, "season": "autumn", "phase": "night"},
                 "nearby": [{"prefab": "chester"}],
@@ -146,6 +154,8 @@ class ModRequestTests(unittest.TestCase):
         self.assertEqual(context["date"], "Day 5, autumn")
         self.assertEqual(context["time"], "night")
         self.assertEqual(context["nearbyNpc"], "chester")
+        self.assertEqual(len(context["saveId"]), 64)
+        self.assertNotIn("KU_world_session", context["saveId"])
 
     def test_write_reply_keeps_recipient_and_duration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

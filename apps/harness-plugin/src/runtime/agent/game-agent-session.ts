@@ -7,6 +7,7 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { AdapterHello, GameChatContext, GameChatRequest } from '../../protocol/game.js'
 import { MultimodalRouter } from '../multimodal/multimodal-router.js'
 import { StreamingReplyAccumulator, type StreamingReplyUpdate } from './streaming-reply.js'
+import type { MemoryService } from '../memory/memory-service.js'
 
 export type InteractionSource = 'chat' | 'voice' | 'retry'
 
@@ -31,7 +32,7 @@ function latestAssistantText(events: readonly SessionEvent[], firstSeq: number):
 export function formatGamePrompt(
   adapter: AdapterHello | undefined,
   request: GameChatRequest,
-  _visualObservation: string | undefined,
+  longTermMemory: string | undefined,
   feedbackEnabled: boolean,
   mode: 'normal' | 'retry' | 'compose' = 'normal',
 ): string {
@@ -61,6 +62,9 @@ export function formatGamePrompt(
     context.roleInstructions === undefined
       ? undefined
       : `Game-specific role instructions:\n${context.roleInstructions}`,
+    longTermMemory === undefined
+      ? undefined
+      : `Long-term memory from XiaoTangYuan's isolated game profile. It may be stale; current game state and tool results always win:\n${longTermMemory}`,
     facts.join('\n'),
     `Player message: ${request.text}`,
   ].filter((item): item is string => item !== undefined).join('\n\n')
@@ -79,6 +83,7 @@ export class GameAgentSession {
     private readonly ctx: Context,
     private readonly adapter: AdapterHello | undefined,
     private readonly multimodal: MultimodalRouter,
+    private readonly memory: MemoryService | undefined,
     private readonly feedbackEnabled = false,
     private readonly progress?: (update: AssistantProgress) => void,
   ) {}
@@ -124,6 +129,7 @@ export class GameAgentSession {
     mode: 'normal' | 'retry' | 'compose',
     interactionId: string,
     source: InteractionSource | 'compose',
+    longTermMemory?: string,
   ): Promise<{ reply: string, sessionId: string, firstTextMs?: number, modelMs: number }> {
     const firstSeq = handle.agent.session.seq
     const sessionId = String(handle.agent.session.id)
@@ -139,7 +145,7 @@ export class GameAgentSession {
     this.activeStreams.set(sessionId, { firstSeq, accumulator })
     const content: ContentBlock[] = [{
       type: 'text',
-      text: formatGamePrompt(this.adapter, request, undefined, mode === 'normal' && this.feedbackEnabled, mode),
+      text: formatGamePrompt(this.adapter, request, longTermMemory, mode === 'normal' && this.feedbackEnabled, mode),
     }]
     content.push({ type: 'image', attachment: image })
     try {
@@ -173,17 +179,21 @@ export class GameAgentSession {
   ): Promise<{ reply: string, sessionId: string, interactionId: string }> {
     const interactionId = randomUUID()
     const started = performance.now()
+    const longTermMemory = mode === 'compose' ? undefined : this.memory?.recall(this.adapter, request)
     const input = await this.multimodal.prepareProcess(this.adapter?.processId, AbortSignal.timeout(10_000))
     const prepared = performance.now()
     const ephemeral = mode === 'compose'
     const handle = ephemeral ? await this.createAgent(input.selection) : await this.ensureAgent(input.selection)
     const agentReady = performance.now()
     try {
-      const result = await this.run(handle, request, input.image, mode, interactionId, source)
+      const result = await this.run(handle, request, input.image, mode, interactionId, source, longTermMemory)
       const firstText = result.firstTextMs === undefined ? 'none' : Math.round(result.firstTextMs)
       this.ctx.logger.info(
         `xiaotangyuan latency interaction=${interactionId} game=${this.adapter?.gameId ?? 'unknown'} source=${source} model=${input.selection.provider}/${input.selection.model} selectionMs=${Math.round(input.timing.modelSelectionMs)} captureMs=${Math.round(input.timing.captureMs)} attachmentMs=${Math.round(input.timing.attachmentMs)} agentReadyMs=${Math.round(agentReady - prepared)} firstTextMs=${firstText} modelMs=${Math.round(result.modelMs)} totalMs=${Math.round(performance.now() - started)}`,
       )
+      if (mode === 'normal') {
+        this.memory?.scheduleLearn(this.adapter, request, result.reply, interactionId, input.selection)
+      }
       return { reply: result.reply, sessionId: result.sessionId, interactionId }
     } finally {
       if (ephemeral) await handle.dispose()

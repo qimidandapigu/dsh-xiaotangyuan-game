@@ -993,6 +993,13 @@ local function build_state()
     local x, y, z = player.Transform:GetWorldPosition()
     local world_state = world.state or {}
     local player_name = player.name
+    local save_id = nil
+    if GLOBAL.TheNet ~= nil and GLOBAL.TheNet.GetSessionIdentifier ~= nil then
+        local ok, value = pcall(GLOBAL.TheNet.GetSessionIdentifier, GLOBAL.TheNet)
+        if ok and type(value) == "string" and value ~= "" then
+            save_id = value
+        end
+    end
     if (player_name == nil or player_name == "") and player.GetDisplayName ~= nil then
         local ok, value = pcall(player.GetDisplayName, player)
         if ok then
@@ -1002,6 +1009,7 @@ local function build_state()
 
     return {
         schema_version = STATE_VERSION,
+        save_id = save_id,
         captured_at_unix = GLOBAL.os ~= nil and GLOBAL.os.time ~= nil and GLOBAL.os.time() or nil,
         game_time_seconds = round(GLOBAL.GetTime(), 2),
         player = {

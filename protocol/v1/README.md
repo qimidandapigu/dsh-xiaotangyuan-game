@@ -8,6 +8,7 @@
 - 消息格式为 JSON-RPC 2.0。
 - 适配器必须先发送一次 `adapter.hello`，然后才能发送其他请求。
 - Windows 语音适配器应在 `adapter.hello` 中提供正整数 `processId`，让媒体 Host 只响应已连接且位于前台的游戏进程。
+- 支持存档隔离的适配器应在 `adapter.hello.saveId` 或每次 `chat.send.context.saveId` 中提供稳定、不透明的本地标识。只允许 1–128 个字母、数字、点、下划线、冒号或连字符；不得发送存档路径、平台账号或用户名。
 
 ## 当前方法
 
@@ -17,6 +18,8 @@
 | `gateway.ping` | 适配器 → Harness | 检查 Gateway 是否正常 |
 | `chat.send` | 适配器 → Harness | 发送玩家文本和少量结构化游戏上下文 |
 | `state.update` | 适配器 → Harness | 上报最新结构化游戏状态，不包含音频和密钥 |
+| `voice.start` | 适配器 → Harness | 让 Harness 为当前 Adapter 声明的游戏进程开始录音 |
+| `voice.stop` | 适配器 → Harness | 停止同一游戏进程发起的录音并进入 ASR、Agent 与 TTS 链路 |
 | `assistant.status` | Harness → 适配器 | 显示录音、转写或思考状态 |
 | `assistant.text.start` | Harness → 适配器 | 一次正文流开始 |
 | `assistant.text.delta` | Harness → 适配器 | 模型正文的真实流式增量；同时携带当前步骤的累计正文 |

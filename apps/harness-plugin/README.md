@@ -1,6 +1,6 @@
 # @qimidandapigu/dsh-xiaotangyuan-game
 
-运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.7.1`。
+运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.7.5`。
 
 ## 职责
 
@@ -16,7 +16,7 @@
 
 ## 安装
 
-`0.7.1` 是当前源码版本，尚未公开发布。公开稳定版仍为 `0.5.1`；开发测试请先在仓库根目录构建：
+`0.7.5` 是当前源码版本，尚未公开发布。公开稳定版仍为 `0.5.1`；开发测试请先在仓库根目录构建：
 
 ```powershell
 pnpm install
@@ -28,7 +28,7 @@ pnpm pack:plugin
 然后安装生成的本地包：
 
 ```powershell
-dsh plugin --profile web add ".\qimidandapigu-dsh-xiaotangyuan-game-0.7.1.tgz"
+dsh plugin --profile web add ".\qimidandapigu-dsh-xiaotangyuan-game-0.7.5.tgz"
 ```
 
 只有在对应 Release 实际创建后，才应使用新的 GitHub 下载地址。
@@ -87,7 +87,7 @@ feedback:
 
 运行时按 `vision.observe`、`speech.transcribe`、`speech.synthesize` 等能力注册和选择实现，不把 ASR、TTS 与游戏 Agent 强制绑定到同一家厂商。自动模式会跳过未配置或不可用的实现；高级配置可以让 ASR 与 TTS 分别选择不同 Provider。
 
-Provider 接口是厂商无关的，但 `0.7.1` 实际内置的语音实现只有 `VolcengineSpeechProvider`。新增厂商时只需实现相应能力接口并注册，不能修改任何游戏 Adapter。
+Provider 接口是厂商无关的，但 `0.7.5` 实际内置的语音实现只有 `VolcengineSpeechProvider`。新增厂商时只需实现相应能力接口并注册，不能修改任何游戏 Adapter。
 
 所有真实密钥通过 `ctx.credentials.resolve(ref)` 在操作时解析。插件配置只保存凭据引用，不缓存或持久化秘密。
 
@@ -108,6 +108,12 @@ Provider 接口是厂商无关的，但 `0.7.1` 实际内置的语音实现只�
 游戏 Agent 直接使用支持图片输入的模型，不先生成视觉描述，也不再串接第二个对话模型；当前提示词不包含 Adapter 的结构化 observation。默认 `F8` 仅在游戏窗口位于前台时触发录音。再次按下语音键会中止当前回复和音频播放。一个 profile 当前只有一个全局键，可用 Virtual-Key `81` 配置 Q、`86` 配置 V。Gateway 还提供 `chat.retry`（保留会话但禁止重复反馈）和 `assistant.compose`（一次性生成，不污染对话记忆）。
 
 主动聊天由 Harness 统一调度，默认在玩家连续 3 分钟没有文字或语音交互后触发。Harness 会截取对应游戏窗口，把画面交给该游戏 Agent，并通过 Adapter 显示回复；语音可用时同时播放 TTS。星露谷、饥荒和缺氧共用这一设置，Adapter 不再分别维护聊天计时器。
+
+## 隔离长期记忆
+
+插件默认启用小汤圆专属长期记忆，并复用 Harness 当前选择的模型在回答完成后后台提取候选项。共同记忆只保存低风险的玩家偏好、爱好、交流风格和一起玩过的游戏；游戏经历按 `gameId + saveId` 隔离。每轮只向游戏 Agent 注入少量相关摘要，不读取或修改普通 Harness 对话。
+
+数据默认位于 `%LOCALAPPDATA%\XiaoTangYuan\profiles\default\memory-v1.sqlite`。可通过 `memory.enabled`、`memory.autoLearn`、`memory.profileId`、`memory.directory` 和 `memory.maxGameEntries` 配置；其中 `memory.directory` 必须是绝对路径。当前版本已有自动学习、去重、容量裁剪和存档隔离，玩家管理界面仍待补充。
 
 媒体 Host 是 Windows x64 自包含程序，打包时必须确认 `.tgz` 中存在：
 

@@ -1,7 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import WebSocket from 'ws'
 import { resolveConfig } from '../src/config.js'
-import { VolcengineSpeechProvider } from '../src/runtime/speech/volcengine-speech-provider.js'
+import {
+  VolcengineSpeechProvider,
+  VolcengineStreamingRecognitionSession,
+} from '../src/runtime/speech/volcengine-speech-provider.js'
 
 function context(): Context {
   return {
@@ -16,6 +21,23 @@ function context(): Context {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Volcengine speech low-latency paths', () => {
+  it('starts audio packets at sequence 2 after the implicit initial request sequence', () => {
+    class FakeSocket extends EventEmitter {
+      readyState = WebSocket.OPEN
+      sent: Buffer[] = []
+      send(value: Buffer): void { this.sent.push(value) }
+      close(): void { this.readyState = WebSocket.CLOSED }
+    }
+    const socket = new FakeSocket()
+    const session = new VolcengineStreamingRecognitionSession(socket as unknown as WebSocket, {
+      format: { sampleRate: 16000, bitsPerSample: 16, channels: 1 },
+    }, new AbortController().signal)
+    session.push(new Uint8Array([1, 2]))
+    expect(socket.sent).toHaveLength(1)
+    expect(socket.sent[0]?.readInt32BE(4)).toBe(2)
+    session.cancel()
+  })
+
   it('yields HTTP chunked TTS audio before the complete response is buffered', async () => {
     const encoder = new TextEncoder()
     const body = new ReadableStream<Uint8Array>({

@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using DoubaoAI.ONI.Commands;
 using DoubaoAI.ONI.GameState;
 using Newtonsoft.Json;
@@ -19,9 +21,11 @@ namespace DoubaoAI.ONI.Harness
         private readonly string _directory;
         private readonly string _outboxPath;
         private readonly string _inboxPath;
+        private readonly string _sessionPath;
         private readonly HashSet<string> _seenInbox = new HashSet<string>();
         private readonly List<JObject> _outbox = new List<JObject>();
         private System.DateTime _lastStateAtUtc = System.DateTime.MinValue;
+        private string _lastSaveId;
 
         internal event Action<string, string> Notification;
         internal event Func<string, JObject, PlayerCommandExecutionResult> ToolExecution;
@@ -34,20 +38,48 @@ namespace DoubaoAI.ONI.Harness
             _directory = Path.Combine(safeRoot, Process.GetCurrentProcess().Id.ToString());
             _outboxPath = Path.Combine(_directory, "outbox.json");
             _inboxPath = Path.Combine(_directory, "inbox.json");
+            _sessionPath = Path.Combine(_directory, "session.json");
             Directory.CreateDirectory(_directory);
-            WriteAtomically(Path.Combine(_directory, "session.json"), new JObject
+            WriteSessionIdentity();
+        }
+
+        private void WriteSessionIdentity()
+        {
+            string saveId = CurrentSaveId();
+            if (saveId == _lastSaveId && File.Exists(_sessionPath)) return;
+            _lastSaveId = saveId;
+            WriteAtomically(_sessionPath, new JObject
             {
                 ["adapterId"] = "qimidandapigu.oxygen-not-included-fairy",
                 ["gameId"] = "oxygen-not-included",
                 ["version"] = "0.1.0",
                 ["protocolVersion"] = "1.1",
                 ["capabilities"] = new JArray("assistant.text-stream"),
-                ["processId"] = Process.GetCurrentProcess().Id
+                ["processId"] = Process.GetCurrentProcess().Id,
+                ["saveId"] = saveId
             });
+        }
+
+        private static string CurrentSaveId()
+        {
+            try
+            {
+                string raw = SaveLoader.Instance == null
+                    ? string.Empty
+                    : Convert.ToString(SaveLoader.Instance.GameInfo.colonyGuid);
+                if (string.IsNullOrWhiteSpace(raw)) return "default";
+                using (SHA256 sha = SHA256.Create())
+                {
+                    byte[] digest = sha.ComputeHash(Encoding.UTF8.GetBytes("oni:" + raw));
+                    return BitConverter.ToString(digest).Replace("-", string.Empty).ToLowerInvariant();
+                }
+            }
+            catch { return "default"; }
         }
 
         internal void PublishState(GameSnapshot snapshot, PlayerCommandSnapshot command)
         {
+            WriteSessionIdentity();
             if (System.DateTime.UtcNow - _lastStateAtUtc < TimeSpan.FromMilliseconds(500)) return;
             _lastStateAtUtc = System.DateTime.UtcNow;
             Enqueue("state.update", new JObject { ["observation"] = Observation(snapshot, command) });

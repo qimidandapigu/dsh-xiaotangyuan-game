@@ -1,4 +1,5 @@
-import { isAbsolute } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 
 export interface VisionConfig {
   enabled?: boolean
@@ -38,6 +39,14 @@ export interface ProactiveChatConfig {
   intervalSeconds?: number
 }
 
+export interface MemoryConfig {
+  enabled?: boolean
+  autoLearn?: boolean
+  directory?: string
+  profileId?: string
+  maxGameEntries?: number
+}
+
 export interface DontStarveInstallerConfig {
   manifestUrl?: string
   archivePath?: string
@@ -54,6 +63,7 @@ export interface Config {
   speech?: SpeechConfig
   media?: MediaConfig
   proactiveChat?: ProactiveChatConfig
+  memory?: MemoryConfig
   feedback?: FeedbackConfig
   installers?: InstallersConfig
 }
@@ -93,6 +103,13 @@ export interface ResolvedConfig {
     enabled: boolean
     intervalSeconds: number
   }
+  memory: {
+    enabled: boolean
+    autoLearn: boolean
+    directory: string
+    profileId: string
+    maxGameEntries: number
+  }
   installers: {
     dontStarve: {
       manifestUrl: string
@@ -131,6 +148,22 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
     || proactiveChatIntervalSeconds < 60
     || proactiveChatIntervalSeconds > 3600) {
     throw new Error('proactiveChat.intervalSeconds must be an integer between 60 and 3600')
+  }
+
+  const memoryProfileId = config.memory?.profileId?.trim() || 'default'
+  if (!/^[a-zA-Z0-9._-]{1,64}$/.test(memoryProfileId)) {
+    throw new Error('memory.profileId must contain 1-64 letters, digits, dots, underscores, or hyphens')
+  }
+  const configuredMemoryDirectory = config.memory?.directory?.trim()
+  if (configuredMemoryDirectory !== undefined && !isAbsolute(configuredMemoryDirectory)) {
+    throw new Error('memory.directory must be absolute')
+  }
+  const localDataRoot = process.env.LOCALAPPDATA?.trim() || join(homedir(), '.xiaotangyuan')
+  const memoryDirectory = configuredMemoryDirectory
+    ?? join(localDataRoot, 'XiaoTangYuan', 'profiles', memoryProfileId)
+  const maxGameEntries = config.memory?.maxGameEntries ?? 300
+  if (!Number.isInteger(maxGameEntries) || maxGameEntries < 50 || maxGameEntries > 2_000) {
+    throw new Error('memory.maxGameEntries must be an integer between 50 and 2000')
   }
 
   const feedbackEnabled = config.feedback?.enabled ?? false
@@ -210,6 +243,13 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
     proactiveChat: {
       enabled: config.proactiveChat?.enabled ?? true,
       intervalSeconds: proactiveChatIntervalSeconds,
+    },
+    memory: {
+      enabled: config.memory?.enabled ?? true,
+      autoLearn: config.memory?.autoLearn ?? true,
+      directory: memoryDirectory,
+      profileId: memoryProfileId,
+      maxGameEntries,
     },
     installers: {
       dontStarve: {

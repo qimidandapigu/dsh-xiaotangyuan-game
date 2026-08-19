@@ -12,6 +12,7 @@ import { CapabilityRegistry } from './runtime/capabilities.js'
 import { SpeechController } from './runtime/speech/speech-controller.js'
 import { VolcengineSpeechProvider } from './runtime/speech/volcengine-speech-provider.js'
 import { registerGameTools } from './tools/game-mod-tools.js'
+import { MemoryService } from './runtime/memory/memory-service.js'
 
 export const name = 'dsh-xiaotangyuan-game'
 export const inject = ['agentDefaultModel', 'agents', 'attachments', 'credentials', 'llm', 'sessions', 'tools']
@@ -24,12 +25,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   ctx.effect(() => {
     const media = new WindowsMediaHost(ctx, resolved.media)
     const multimodal = new MultimodalRouter(ctx, resolved.vision, media)
+    const memory = resolved.memory.enabled ? new MemoryService(ctx, resolved.memory) : undefined
     let speech: SpeechController | undefined
     const gateway = new GameGateway(
       ctx,
       resolved.host,
       resolved.port,
       multimodal,
+      memory,
       resolved.proactiveChat,
       processIds => speech?.updateTargets(processIds),
       feedback !== undefined,
@@ -43,6 +46,8 @@ export function apply(ctx: Context, config: Config = {}): void {
       async (processId, interactionId, finalText) => {
         return await speech?.finishSpeechReply(processId, interactionId, finalText) ?? false
       },
+      processId => media.startRecording(processId),
+      processId => media.stopRecording(processId),
     )
     const capabilities = new CapabilityRegistry()
     const speechProvider = new VolcengineSpeechProvider(ctx, resolved.speech)
@@ -56,6 +61,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     return async () => {
       await speech?.close()
       await gateway.close()
+      await memory?.close()
     }
   })
 }
