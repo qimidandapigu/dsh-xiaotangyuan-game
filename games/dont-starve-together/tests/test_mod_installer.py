@@ -48,6 +48,16 @@ class ModInstallerTests(unittest.TestCase):
         self.assertIn('inst.name = "小汤圆"', modmain)
         self.assertIn('label = "小汤圆格数"', modinfo)
 
+    def test_butterfly_skill_uses_server_rpc_and_container_pickup(self) -> None:
+        modmain = (Path(__file__).parents[1] / "game-mod" / "modmain.lua").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('AddModRPCHandler(RPC_NAMESPACE, "skill_atom"', modmain)
+        self.assertIn('AddClientModRPCHandler(RPC_NAMESPACE, "skill_result"', modmain)
+        self.assertIn('atom == "dst.find_nearest_butterfly"', modmain)
+        self.assertIn('target.prefab ~= "butterfly"', modmain)
+        self.assertIn('container:GiveItem(current', modmain)
+
     def test_enables_local_mod_only_once(self) -> None:
         first = enable_modsettings("-- settings\n")
         second = enable_modsettings(first)

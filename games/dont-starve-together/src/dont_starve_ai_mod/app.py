@@ -12,6 +12,7 @@ from typing import Any
 
 from . import __version__
 from .config import Settings
+from .game_state import read_game_state
 from .harness_client import HarnessClient
 
 
@@ -50,7 +51,8 @@ def build_chat_context(state: dict[str, object] | None) -> dict[str, object]:
         "roleInstructions": (
             "You are Chester, the player's warm and practical companion in Don't Starve Together. "
             "Answer in concise natural Chinese unless the player uses another language. "
-            "Use the supplied game state as facts and never claim you performed a game action."
+            "Use the supplied game state as facts. Only claim a game action succeeded when "
+            "the executable skill tool returned an explicit success in this turn."
         )
     }
     if state is None:
@@ -103,12 +105,15 @@ class ChesterApp:
             game_id=GAME_ID,
             version=ADAPTER_VERSION,
             on_notification=self._on_harness_notification,
+            on_request=self._on_harness_request,
             connect_timeout=settings.connection_timeout_seconds,
         )
         self._busy = threading.Lock()
+        self._skill_busy = threading.Lock()
         self._seen_request_ids: set[str] = set()
         self._last_bridge_heartbeat = 0.0
         self._last_bridge_status_write = 0.0
+        self._last_play_heartbeat = 0.0
         self._last_request_at_unix: float | None = None
         self._last_request_action: str | None = None
         self._last_error: str | None = None
@@ -133,6 +138,53 @@ class ChesterApp:
         if not isinstance(result, dict) or not isinstance(result.get("reply"), str):
             raise RuntimeError("Harness 没有返回有效文字回复")
         return result["reply"]
+
+    def _on_harness_request(self, method: str, params: dict[str, Any]) -> Any:
+        if method != "game.atom.execute":
+            raise RuntimeError(f"不支持的 Harness 请求：{method}")
+        atom = params.get("atom")
+        arguments = params.get("arguments")
+        if not isinstance(atom, str) or not atom.startswith("dst."):
+            raise RuntimeError("原子能力名称无效")
+        if not isinstance(arguments, dict):
+            raise RuntimeError("原子能力参数无效")
+        return self._execute_game_atom(atom, arguments)
+
+    def _execute_game_atom(self, atom: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        command_path = self.settings.skill_command_file
+        result_path = self.settings.skill_result_file
+        if command_path is None or result_path is None:
+            raise RuntimeError("饥荒技能 Bridge 文件不可用")
+        with self._skill_busy:
+            command_id = str(uuid.uuid4())
+            command = {
+                "schema_version": 1,
+                "id": command_id,
+                "atom": atom,
+                "arguments": arguments,
+                "created_at_unix": time.time(),
+            }
+            command_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = command_path.with_suffix(command_path.suffix + ".tmp")
+            temporary.write_text(json.dumps(command, ensure_ascii=False), encoding="utf-8")
+            os.replace(temporary, command_path)
+            deadline = time.monotonic() + 12.0
+            while time.monotonic() < deadline:
+                try:
+                    result = json.loads(result_path.read_text(encoding="utf-8"))
+                except (FileNotFoundError, OSError, json.JSONDecodeError):
+                    time.sleep(0.05)
+                    continue
+                if not isinstance(result, dict) or result.get("id") != command_id:
+                    time.sleep(0.05)
+                    continue
+                if result.get("success") is not True:
+                    raise RuntimeError(str(result.get("error") or f"原子能力失败：{atom}"))
+                value = result.get("result")
+                if not isinstance(value, dict):
+                    raise RuntimeError("Lua Mod 返回了无效原子能力结果")
+                return value
+            raise RuntimeError(f"等待 Lua Mod 执行超时：{atom}")
 
     def _on_harness_notification(self, method: str, params: dict[str, Any]) -> None:
         if method == "assistant.status":
@@ -181,7 +233,12 @@ class ChesterApp:
 
     def _publish_state(self, state: dict[str, object] | None) -> None:
         if state is not None:
-            self._gateway.notify("state.update", {"observation": state})
+            context = build_chat_context(state)
+            payload: dict[str, object] = {"observation": state}
+            save_id = context.get("saveId")
+            if isinstance(save_id, str):
+                payload["saveId"] = save_id
+            self._gateway.notify("state.update", payload)
 
     def _retry_last(
         self,
@@ -245,6 +302,7 @@ class ChesterApp:
         while True:
             self._write_bridge_status()
             self._log_bridge_heartbeat(path)
+            self._publish_play_heartbeat()
             for request in self._read_mod_requests(path):
                 self._last_request_at_unix = time.time()
                 action = request.get("action")
@@ -252,6 +310,15 @@ class ChesterApp:
                 self._write_bridge_status(force=True)
                 self._handle_mod_request(request)
             time.sleep(poll_interval)
+
+    def _publish_play_heartbeat(self) -> None:
+        now = time.monotonic()
+        if now - self._last_play_heartbeat < 15.0:
+            return
+        self._last_play_heartbeat = now
+        result = read_game_state(self.settings.state_file)
+        state = result.get("data")
+        self._publish_state(state if isinstance(state, dict) else None)
 
     def _write_bridge_status(self, force: bool = False) -> None:
         path = self.settings.bridge_status_file

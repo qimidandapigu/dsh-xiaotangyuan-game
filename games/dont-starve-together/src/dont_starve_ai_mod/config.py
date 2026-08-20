@@ -13,6 +13,8 @@ STATE_FILENAME = "dont_starve_ai_mod_state.json"
 REPLY_FILENAME = "dont_starve_ai_mod_reply.json"
 REQUEST_FILENAME = "dont_starve_ai_mod_requests.json"
 BRIDGE_STATUS_FILENAME = "dont_starve_ai_mod_bridge_status.json"
+SKILL_COMMAND_FILENAME = "dont_starve_ai_mod_skill_command.json"
+SKILL_RESULT_FILENAME = "dont_starve_ai_mod_skill_result.json"
 
 
 def _env(name: str, default: str = "") -> str:
@@ -98,6 +100,8 @@ class Settings:
     reply_file: Path | None
     request_file: Path | None
     bridge_status_file: Path | None
+    skill_command_file: Path | None
+    skill_result_file: Path | None
     runtime_dir: Path
 
     @property
@@ -108,7 +112,12 @@ class Settings:
         parsed = urlparse(self.gateway_url)
         if parsed.scheme != "ws" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
             return ["HARNESS_GATEWAY_URL 必须是本机 ws:// 地址"]
-        if self.request_file is None or self.reply_file is None:
+        if (
+            self.request_file is None
+            or self.reply_file is None
+            or self.skill_command_file is None
+            or self.skill_result_file is None
+        ):
             return ["没有找到《饥荒联机版》目录，无法定位 Lua Bridge 文件"]
         return []
 
@@ -147,5 +156,7 @@ def load_settings(project_root: Path | None = None) -> Settings:
         reply_file=bridge_path("DST_REPLY_FILE", REPLY_FILENAME),
         request_file=bridge_path("DST_REQUEST_FILE", REQUEST_FILENAME),
         bridge_status_file=bridge_path("DST_BRIDGE_STATUS_FILE", BRIDGE_STATUS_FILENAME),
+        skill_command_file=bridge_path("DST_SKILL_COMMAND_FILE", SKILL_COMMAND_FILENAME),
+        skill_result_file=bridge_path("DST_SKILL_RESULT_FILE", SKILL_RESULT_FILENAME),
         runtime_dir=runtime_dir,
     )

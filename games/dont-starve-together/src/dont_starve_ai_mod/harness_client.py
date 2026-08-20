@@ -33,6 +33,7 @@ class HarnessClient:
         game_id: str,
         version: str,
         on_notification: Callable[[str, dict[str, Any]], None],
+        on_request: Callable[[str, dict[str, Any]], Any] | None = None,
         connect_timeout: float = 3.0,
     ) -> None:
         self.url = url
@@ -40,6 +41,7 @@ class HarnessClient:
         self.game_id = game_id
         self.version = version
         self.on_notification = on_notification
+        self.on_request = on_request
         self.connect_timeout = connect_timeout
         self._process_id: int | None = None
         self._socket: websocket.WebSocket | None = None
@@ -91,7 +93,12 @@ class HarnessClient:
                             "gameId": self.game_id,
                             "version": self.version,
                             "protocolVersion": "1.1",
-                            "capabilities": ["assistant.text-stream"],
+                            "capabilities": [
+                                "assistant.text-stream",
+                                "dst.find_nearest_butterfly",
+                                "dst.attack_butterfly",
+                                "dst.collect_butterfly_loot",
+                            ],
                             "processId": self._process_id,
                         },
                     }
@@ -119,19 +126,52 @@ class HarnessClient:
             if not isinstance(message, dict):
                 continue
             request_id = message.get("id")
+            method = message.get("method")
+            params = message.get("params")
+            if isinstance(request_id, (str, int)) and isinstance(method, str):
+                request_params = params if isinstance(params, dict) else {}
+                threading.Thread(
+                    target=self._handle_server_request,
+                    args=(request_id, method, request_params),
+                    daemon=True,
+                    name="chester-harness-server-request",
+                ).start()
+                continue
             if isinstance(request_id, (str, int)):
                 with self._pending_lock:
                     pending = self._pending.get(str(request_id))
                 if pending is not None:
                     pending.put(message)
                 continue
-            method = message.get("method")
-            params = message.get("params")
             if isinstance(method, str) and isinstance(params, dict):
                 try:
                     self.on_notification(method, params)
                 except Exception:
                     LOGGER.exception("处理 Harness 通知失败：%s", method)
+
+    def _handle_server_request(
+        self,
+        request_id: str | int,
+        method: str,
+        params: dict[str, Any],
+    ) -> None:
+        try:
+            if self.on_request is None:
+                raise HarnessRpcError(f"Adapter 不支持 Harness 请求：{method}")
+            result = self.on_request(method, params)
+            self._send_payload({"jsonrpc": "2.0", "id": request_id, "result": result})
+        except Exception as exc:
+            LOGGER.exception("处理 Harness 请求失败：%s", method)
+            try:
+                self._send_payload(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32010, "message": str(exc)},
+                    }
+                )
+            except Exception:
+                LOGGER.exception("发送 Harness 请求错误结果失败：%s", method)
 
     def _send_payload(self, payload: dict[str, Any]) -> None:
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))

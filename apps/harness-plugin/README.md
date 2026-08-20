@@ -1,6 +1,6 @@
 # @qimidandapigu/dsh-xiaotangyuan-game
 
-运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.7.5`。
+运行在 DeepSeek Harness 中的“小汤圆游戏 AI”重型运行时。当前插件版本为 `0.7.6`。
 
 ## 职责
 
@@ -16,7 +16,7 @@
 
 ## 安装
 
-`0.7.5` 是当前源码版本，尚未公开发布。公开稳定版仍为 `0.5.1`；开发测试请先在仓库根目录构建：
+`0.7.6` 是当前源码版本，尚未公开发布。公开稳定版仍为 `0.5.1`；开发测试请先在仓库根目录构建：
 
 ```powershell
 pnpm install
@@ -28,7 +28,7 @@ pnpm pack:plugin
 然后安装生成的本地包：
 
 ```powershell
-dsh plugin --profile web add ".\qimidandapigu-dsh-xiaotangyuan-game-0.7.5.tgz"
+dsh plugin --profile web add ".\qimidandapigu-dsh-xiaotangyuan-game-0.7.6.tgz"
 ```
 
 只有在对应 Release 实际创建后，才应使用新的 GitHub 下载地址。
@@ -66,6 +66,10 @@ Gateway 只允许 `127.0.0.1`、`localhost` 或 `::1`，不会暴露到局域网
 | `media.executablePath` | 插件内置路径 | 自定义媒体 Host 路径 |
 | `proactiveChat.enabled` | `true` | 让已连接游戏中的小精灵主动说话 |
 | `proactiveChat.intervalSeconds` | `180` | 玩家没有交互后触发主动聊天的统一间隔 |
+| `memory.enabled` | `true` | 启用小汤圆隔离长期记忆和本地游玩统计 |
+| `memory.autoLearn` | `true` | 回答后自动提取记忆，并在会话结束时形成阶段总结 |
+| `memory.profileId` | `default` | 同一台电脑上区分不同玩家的本地记忆 Profile |
+| `memory.maxGameEntries` | `300` | 每个游戏存档保留的游戏记忆软上限 |
 | `installers.dontStarve.manifestUrl` | 官方 v1 清单 | 饥荒安装包发布清单 |
 | `installers.dontStarve.archivePath` | 无 | 仅供本地开发的绝对 ZIP 路径；必须同时配置版本和 SHA-256 |
 
@@ -87,7 +91,7 @@ feedback:
 
 运行时按 `vision.observe`、`speech.transcribe`、`speech.synthesize` 等能力注册和选择实现，不把 ASR、TTS 与游戏 Agent 强制绑定到同一家厂商。自动模式会跳过未配置或不可用的实现；高级配置可以让 ASR 与 TTS 分别选择不同 Provider。
 
-Provider 接口是厂商无关的，但 `0.7.5` 实际内置的语音实现只有 `VolcengineSpeechProvider`。新增厂商时只需实现相应能力接口并注册，不能修改任何游戏 Adapter。
+Provider 接口是厂商无关的，但 `0.7.6` 实际内置的语音实现只有 `VolcengineSpeechProvider`。新增厂商时只需实现相应能力接口并注册，不能修改任何游戏 Adapter。
 
 所有真实密钥通过 `ctx.credentials.resolve(ref)` 在操作时解析。插件配置只保存凭据引用，不缓存或持久化秘密。
 
@@ -113,7 +117,9 @@ Provider 接口是厂商无关的，但 `0.7.5` 实际内置的语音实现只�
 
 插件默认启用小汤圆专属长期记忆，并复用 Harness 当前选择的模型在回答完成后后台提取候选项。共同记忆只保存低风险的玩家偏好、爱好、交流风格和一起玩过的游戏；游戏经历按 `gameId + saveId` 隔离。每轮只向游戏 Agent 注入少量相关摘要，不读取或修改普通 Harness 对话。
 
-数据默认位于 `%LOCALAPPDATA%\XiaoTangYuan\profiles\default\memory-v1.sqlite`。可通过 `memory.enabled`、`memory.autoLearn`、`memory.profileId`、`memory.directory` 和 `memory.maxGameEntries` 配置；其中 `memory.directory` 必须是绝对路径。当前版本已有自动学习、去重、容量裁剪和存档隔离，玩家管理界面仍待补充。
+数据默认位于 `%LOCALAPPDATA%\XiaoTangYuan\profiles\default\memory-v1.sqlite`。可通过 `memory.enabled`、`memory.autoLearn`、`memory.profileId`、`memory.directory` 和 `memory.maxGameEntries` 配置；其中 `memory.directory` 必须是绝对路径。当前版本已有自动学习、去重、容量裁剪、存档隔离、游玩统计和阶段总结。
+
+玩家可直接对 Harness 说“你记得我什么”“把共同爱好改成探索和经营”“忘掉当前存档的这条计划”或“清空小汤圆记忆”。插件分别调用只读查看、共同记忆纠正和受确认保护的删除工具；删除记忆不会修改游戏存档。游玩日期、会话次数和活跃时长只作为本地统计展示，不进入游戏 Agent Prompt。
 
 媒体 Host 是 Windows x64 自包含程序，打包时必须确认 `.tgz` 中存在：
 

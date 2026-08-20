@@ -8,6 +8,9 @@ import type { AdapterHello, GameChatContext, GameChatRequest } from '../../proto
 import { MultimodalRouter } from '../multimodal/multimodal-router.js'
 import { StreamingReplyAccumulator, type StreamingReplyUpdate } from './streaming-reply.js'
 import type { MemoryService } from '../memory/memory-service.js'
+import type { GameAtomExecutor } from '../skills/contracts.js'
+import type { SkillService } from '../skills/skill-service.js'
+import { registerSkillTools } from '../../tools/skill-tools.js'
 
 export type InteractionSource = 'chat' | 'voice' | 'retry'
 
@@ -84,6 +87,9 @@ export class GameAgentSession {
     private readonly adapter: AdapterHello | undefined,
     private readonly multimodal: MultimodalRouter,
     private readonly memory: MemoryService | undefined,
+    private readonly skills: SkillService | undefined,
+    private readonly atomExecutor: GameAtomExecutor | undefined,
+    private readonly memorySessionKey: string,
     private readonly feedbackEnabled = false,
     private readonly progress?: (update: AssistantProgress) => void,
   ) {}
@@ -103,6 +109,9 @@ export class GameAgentSession {
       setup: (agentCtx) => {
         const selected: ModelSelectionRef = { current: selection, assembled: undefined }
         installModelSelection(agentCtx, selected)
+        if (this.skills !== undefined && this.atomExecutor !== undefined) {
+          registerSkillTools(agentCtx, this.adapter, this.skills, this.atomExecutor)
+        }
         agentCtx.on('session/event', (session, event) => this.onSessionEvent(String(session.id), event))
       },
     })
@@ -192,7 +201,7 @@ export class GameAgentSession {
         `xiaotangyuan latency interaction=${interactionId} game=${this.adapter?.gameId ?? 'unknown'} source=${source} model=${input.selection.provider}/${input.selection.model} selectionMs=${Math.round(input.timing.modelSelectionMs)} captureMs=${Math.round(input.timing.captureMs)} attachmentMs=${Math.round(input.timing.attachmentMs)} agentReadyMs=${Math.round(agentReady - prepared)} firstTextMs=${firstText} modelMs=${Math.round(result.modelMs)} totalMs=${Math.round(performance.now() - started)}`,
       )
       if (mode === 'normal') {
-        this.memory?.scheduleLearn(this.adapter, request, result.reply, interactionId, input.selection)
+        this.memory?.scheduleLearn(this.memorySessionKey, this.adapter, request, result.reply, interactionId, input.selection)
       }
       return { reply: result.reply, sessionId: result.sessionId, interactionId }
     } finally {

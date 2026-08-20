@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import WebSocket, { WebSocketServer, type RawData } from 'ws'
 import {
@@ -5,6 +6,7 @@ import {
   readGameChat,
   readGameRetry,
   readStateUpdate,
+  readStateUpdateSaveId,
   type AdapterHello,
   type GameChatContext,
 } from '../protocol/game.js'
@@ -14,17 +16,27 @@ import { MultimodalRouter } from '../runtime/multimodal/multimodal-router.js'
 import type { VoiceInteractionHandler } from '../runtime/speech/speech-controller.js'
 import type { ResolvedConfig } from '../config.js'
 import type { MemoryService } from '../runtime/memory/memory-service.js'
+import type { SkillService } from '../runtime/skills/skill-service.js'
+import type { SkillValue } from '../runtime/skills/contracts.js'
+
+interface PendingAdapterRequest {
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
+}
 
 interface ConnectionState {
   socket: WebSocket
   adapter?: AdapterHello
   session?: GameAgentSession
   latestObservation?: Record<string, unknown>
+  latestSaveId?: string
   queue: Promise<void>
   lastInteractionAt: number
   proactiveInFlight: boolean
   speechQueue: Promise<void>
   streamingInteractions: Set<string>
+  memorySessionKey: string
+  pendingAdapterRequests: Map<string, PendingAdapterRequest>
 }
 
 const PROACTIVE_PROMPT = [
@@ -45,6 +57,7 @@ export class GameGateway implements VoiceInteractionHandler {
     port: number,
     private readonly multimodal: MultimodalRouter,
     private readonly memory: MemoryService | undefined,
+    private readonly skills: SkillService | undefined,
     private readonly proactiveChat: ResolvedConfig['proactiveChat'],
     private readonly processTargetsChanged: (processIds: readonly number[]) => void,
     private readonly feedbackEnabled: boolean,
@@ -78,6 +91,8 @@ export class GameGateway implements VoiceInteractionHandler {
       proactiveInFlight: false,
       speechQueue: Promise.resolve(),
       streamingInteractions: new Set(),
+      memorySessionKey: randomUUID(),
+      pendingAdapterRequests: new Map(),
     }
     this.connections.add(state)
     this.send(socket, {
@@ -90,6 +105,7 @@ export class GameGateway implements VoiceInteractionHandler {
     })
 
     socket.on('message', (data) => {
+      if (this.handleAdapterResponse(state, data)) return
       state.queue = state.queue
         .then(() => this.onMessage(state, data))
         .catch(error => {
@@ -97,7 +113,10 @@ export class GameGateway implements VoiceInteractionHandler {
         })
     })
     socket.on('close', () => {
+      for (const pending of state.pendingAdapterRequests.values()) pending.reject(new Error('游戏 Adapter 已断开'))
+      state.pendingAdapterRequests.clear()
       this.connections.delete(state)
+      this.memory?.endSession(state.memorySessionKey)
       this.publishProcessTargets()
       void state.session?.dispose().catch(error => {
         console.error('[dsh-xiaotangyuan-game] failed to dispose game agent', error)
@@ -137,12 +156,16 @@ export class GameGateway implements VoiceInteractionHandler {
       case 'adapter.hello': {
         if (state.session !== undefined) throw new Error('adapter.hello may only be sent once per connection')
         state.adapter = readAdapterHello(request.params)
-        this.memory?.adapterConnected(state.adapter)
+        state.latestSaveId = state.adapter.saveId
+        this.memory?.adapterConnected(state.memorySessionKey, state.adapter)
         state.session = new GameAgentSession(
           this.ctx,
           state.adapter,
           this.multimodal,
           this.memory,
+          this.skills,
+          (atom, args, signal) => this.callAdapterAtom(state, atom, args, signal),
+          state.memorySessionKey,
           this.feedbackEnabled,
           update => {
             if (!state.streamingInteractions.has(update.interactionId)) {
@@ -173,6 +196,7 @@ export class GameGateway implements VoiceInteractionHandler {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before chat.send')
         this.markInteraction(state)
         const chat = readGameChat(request.params)
+        if (chat.context?.saveId !== undefined) state.latestSaveId = chat.context.saveId
         if (chat.context?.observation !== undefined) state.latestObservation = chat.context.observation
         const result = await state.session.ask(chat)
         this.finishTextStream(state, result.interactionId, result.reply, 'chat')
@@ -182,6 +206,7 @@ export class GameGateway implements VoiceInteractionHandler {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before chat.retry')
         this.markInteraction(state)
         const retry = readGameRetry(request.params)
+        if (retry.context?.saveId !== undefined) state.latestSaveId = retry.context.saveId
         if (retry.context?.observation !== undefined) state.latestObservation = retry.context.observation
         const result = await state.session.retry(retry.context)
         this.finishTextStream(state, result.interactionId, result.reply, 'retry')
@@ -196,12 +221,23 @@ export class GameGateway implements VoiceInteractionHandler {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before assistant.compose')
         this.markInteraction(state)
         const chat = readGameChat(request.params)
+        if (chat.context?.saveId !== undefined) state.latestSaveId = chat.context.saveId
         if (chat.context?.observation !== undefined) state.latestObservation = chat.context.observation
         return await state.session.compose(chat)
       }
-      case 'state.update':
+      case 'state.update': {
         state.latestObservation = readStateUpdate(request.params)
+        const saveId = readStateUpdateSaveId(request.params)
+        if (saveId !== undefined) state.latestSaveId = saveId
+        this.memory?.observeSession(state.memorySessionKey, state.adapter, {
+          text: 'state heartbeat',
+          context: {
+            ...(saveId === undefined ? {} : { saveId }),
+            observation: state.latestObservation,
+          },
+        })
         return { accepted: true }
+      }
       case 'voice.start': {
         const processId = state.adapter?.processId
         if (processId === undefined) throw new Error('adapter.hello must provide processId before voice.start')
@@ -221,6 +257,68 @@ export class GameGateway implements VoiceInteractionHandler {
 
   private markInteraction(state: ConnectionState): void {
     state.lastInteractionAt = Date.now()
+  }
+
+  private handleAdapterResponse(state: ConnectionState, data: RawData): boolean {
+    let value: unknown
+    try {
+      value = JSON.parse(data.toString())
+    } catch {
+      return false
+    }
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+    const record = value as Record<string, unknown>
+    if (record.method !== undefined || (typeof record.id !== 'string' && typeof record.id !== 'number')) return false
+    const pending = state.pendingAdapterRequests.get(String(record.id))
+    if (pending === undefined) return false
+    state.pendingAdapterRequests.delete(String(record.id))
+    const error = record.error
+    if (typeof error === 'object' && error !== null && !Array.isArray(error)) {
+      const message = (error as Record<string, unknown>).message
+      pending.reject(new Error(typeof message === 'string' ? message : '游戏原子能力执行失败'))
+    } else {
+      pending.resolve(record.result)
+    }
+    return true
+  }
+
+  private async callAdapterAtom(
+    state: ConnectionState,
+    atom: string,
+    args: Record<string, SkillValue>,
+    signal: AbortSignal,
+  ): Promise<unknown> {
+    if (state.adapter?.capabilities?.includes(atom) !== true) throw new Error(`Adapter 未声明原子能力：${atom}`)
+    if (state.socket.readyState !== WebSocket.OPEN) throw new Error('游戏 Adapter 未连接')
+    const id = randomUUID()
+    return await new Promise<unknown>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
+        state.pendingAdapterRequests.delete(id)
+      }
+      const onAbort = () => {
+        cleanup()
+        reject(signal.reason instanceof Error ? signal.reason : new Error('技能执行已取消'))
+      }
+      const timer = setTimeout(() => {
+        cleanup()
+        reject(new Error(`游戏原子能力超时：${atom}`))
+      }, 15_000)
+      state.pendingAdapterRequests.set(id, {
+        resolve: value => { cleanup(); resolve(value) },
+        reject: error => { cleanup(); reject(error) },
+      })
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) {
+        onAbort()
+        return
+      }
+      this.send(state.socket, {
+        jsonrpc: '2.0', id, method: 'game.atom.execute',
+        params: { atom, arguments: args },
+      })
+    })
   }
 
   private async runProactiveCycle(): Promise<void> {
@@ -252,6 +350,7 @@ export class GameGateway implements VoiceInteractionHandler {
     }
     try {
       const context: GameChatContext = {
+        ...(state.latestSaveId === undefined ? {} : { saveId: state.latestSaveId }),
         ...(state.latestObservation === undefined ? {} : { observation: state.latestObservation }),
       }
       const result = await state.session.compose({ text: PROACTIVE_PROMPT, context })
@@ -306,6 +405,7 @@ export class GameGateway implements VoiceInteractionHandler {
     if (connection?.session === undefined) throw new Error('前台游戏没有连接到小汤圆 Gateway')
     this.markInteraction(connection)
     const context: GameChatContext = {
+      ...(connection.latestSaveId === undefined ? {} : { saveId: connection.latestSaveId }),
       ...(connection.latestObservation === undefined ? {} : { observation: connection.latestObservation }),
     }
     const result = await connection.session.ask({ text: transcript, context }, 'voice')
@@ -339,6 +439,7 @@ export class GameGateway implements VoiceInteractionHandler {
     clearInterval(this.proactiveTimer)
     const sessions: GameAgentSession[] = []
     for (const connection of this.connections) {
+      this.memory?.endSession(connection.memorySessionKey)
       connection.socket.close(1001, 'gateway shutting down')
       if (connection.session !== undefined) sessions.push(connection.session)
     }

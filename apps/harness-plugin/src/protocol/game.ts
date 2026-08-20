@@ -113,3 +113,7 @@ export function readStateUpdate(value: unknown): Record<string, unknown> {
   const params = asRecord(value)
   return asRecord(params.observation)
 }
+
+export function readStateUpdateSaveId(value: unknown): string | undefined {
+  return optionalOpaqueId(asRecord(value), 'saveId')
+}

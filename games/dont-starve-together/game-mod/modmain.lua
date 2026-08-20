@@ -26,6 +26,8 @@ local STATE_PATH = "unsafedata/dont_starve_ai_mod_state.json"
 local REQUEST_PATH = "unsafedata/dont_starve_ai_mod_requests.json"
 local REPLY_PATH = "unsafedata/dont_starve_ai_mod_reply.json"
 local BRIDGE_STATUS_PATH = "unsafedata/dont_starve_ai_mod_bridge_status.json"
+local SKILL_COMMAND_PATH = "unsafedata/dont_starve_ai_mod_skill_command.json"
+local SKILL_RESULT_PATH = "unsafedata/dont_starve_ai_mod_skill_result.json"
 -- DST only permits writes to selected extensions in unsafedata.  Keeping this
 -- as .txt is important: a .log file silently fails to open and hides exactly
 -- the diagnostics needed when the input bridge does not start.
@@ -1084,6 +1086,256 @@ local function read_json(path)
     return ok and value or nil
 end
 
+local last_skill_command_id = nil
+
+local function send_skill_result(player, command_id, success, result, error_message)
+    local rpc_namespace = CLIENT_MOD_RPC ~= nil and CLIENT_MOD_RPC[RPC_NAMESPACE] or nil
+    local rpc = rpc_namespace ~= nil and rpc_namespace["skill_result"] or nil
+    if rpc == nil or player == nil or player.userid == nil then
+        diagnostic("skill result RPC unavailable: " .. tostring(command_id))
+        return
+    end
+    local encoded = json.encode({
+        id = command_id,
+        success = success == true,
+        result = result,
+        error = error_message,
+    })
+    local ok, send_error = pcall(SendModRPCToClient, rpc, player.userid, encoded)
+    if not ok then
+        diagnostic("skill result RPC failed: " .. tostring(send_error))
+    end
+end
+
+local function finish_skill_motion(player, chester, task)
+    if task ~= nil then
+        task:Cancel()
+    end
+    if chester ~= nil and chester:IsValid() then
+        if chester.components ~= nil and chester.components.locomotor ~= nil then
+            chester.components.locomotor:Stop()
+        end
+        chester:RestartBrain("xiaotangyuan_skill")
+    end
+    if player ~= nil then
+        player._chester_ai_skill_task = nil
+    end
+end
+
+local function find_nearest_butterfly(player, radius)
+    local px, py, pz = player.Transform:GetWorldPosition()
+    local nearest = nil
+    local nearest_distance = nil
+    local entities = GLOBAL.TheSim:FindEntities(px, py, pz, radius, nil, { "INLIMBO", "NOCLICK" })
+    for _, entity in pairs(entities) do
+        local health = entity.components ~= nil and entity.components.health or nil
+        if entity.prefab == "butterfly" and health ~= nil and not health:IsDead() then
+            local distance = player:GetDistanceSqToInst(entity)
+            if nearest_distance == nil or distance < nearest_distance then
+                nearest = entity
+                nearest_distance = distance
+            end
+        end
+    end
+    return nearest
+end
+
+local function execute_attack_butterfly(player, command_id, arguments)
+    local target_id = tonumber(arguments.targetId)
+    local target = target_id ~= nil and GLOBAL.Ents[target_id] or nil
+    local chester = ensure_player_chester(player)
+    local locomotor = chester ~= nil and chester.components ~= nil and chester.components.locomotor or nil
+    if target == nil or not target:IsValid() or target.prefab ~= "butterfly" then
+        send_skill_result(player, command_id, false, nil, "目标蝴蝶已经离开")
+        return
+    end
+    if chester == nil or locomotor == nil then
+        send_skill_result(player, command_id, false, nil, "没有找到可行动的小汤圆")
+        return
+    end
+    if player:GetDistanceSqToInst(target) > 25 * 25 then
+        send_skill_result(player, command_id, false, nil, "蝴蝶距离玩家太远")
+        return
+    end
+
+    chester:StopBrain("xiaotangyuan_skill")
+    local elapsed = 0
+    local task = nil
+    local finished = false
+    local function finish(success, result, error_message)
+        if finished then return end
+        finished = true
+        finish_skill_motion(player, chester, task)
+        send_skill_result(player, command_id, success, result, error_message)
+    end
+    task = chester:DoPeriodicTask(0.1, function()
+        elapsed = elapsed + 0.1
+        if not player:IsValid() or player:HasTag("playerghost") then
+            finish(false, nil, "玩家当前无法指挥小汤圆")
+            return
+        end
+        if not target:IsValid() then
+            finish(false, nil, "追击时目标蝴蝶消失了")
+            return
+        end
+        local health = target.components ~= nil and target.components.health or nil
+        if health == nil or health:IsDead() then
+            local x, _, z = target.Transform:GetWorldPosition()
+            finish(true, { targetId = target.GUID, defeated = true, x = x, z = z }, nil)
+            return
+        end
+        if chester:GetDistanceSqToInst(target) <= 1.7 * 1.7 then
+            local x, _, z = target.Transform:GetWorldPosition()
+            locomotor:Stop()
+            set_jingling_visual_mode(chester, JINGLING_VISUAL_STRIKE, 0.5)
+            local combat = target.components ~= nil and target.components.combat or nil
+            if combat == nil then
+                finish(false, nil, "蝴蝶无法被攻击")
+                return
+            end
+            combat:GetAttacked(player, 1)
+            finish(true, { targetId = target.GUID, defeated = true, x = x, z = z }, nil)
+            return
+        end
+        if elapsed >= 8 then
+            finish(false, nil, "小汤圆没能在时限内追上蝴蝶")
+            return
+        end
+        locomotor:GoToPoint(target:GetPosition(), nil, true)
+    end)
+    player._chester_ai_skill_task = task
+end
+
+local function execute_collect_butterfly_loot(player, command_id, arguments)
+    local center_x = tonumber(arguments.x)
+    local center_z = tonumber(arguments.z)
+    local radius = math.max(1, math.min(tonumber(arguments.radius) or 4, 8))
+    local chester = ensure_player_chester(player)
+    local locomotor = chester ~= nil and chester.components ~= nil and chester.components.locomotor or nil
+    local container = chester ~= nil and chester.components ~= nil and chester.components.container or nil
+    if center_x == nil or center_z == nil then
+        send_skill_result(player, command_id, false, nil, "掉落物位置无效")
+        return
+    end
+    if chester == nil or locomotor == nil or container == nil then
+        send_skill_result(player, command_id, false, nil, "小汤圆没有可用容器")
+        return
+    end
+
+    chester:StopBrain("xiaotangyuan_skill")
+    local elapsed = 0
+    local quiet_time = 0
+    local task = nil
+    local finished = false
+    local current = nil
+    local collected = {}
+    local function finish(success, error_message)
+        if finished then return end
+        finished = true
+        finish_skill_motion(player, chester, task)
+        send_skill_result(player, command_id, success, {
+            count = #collected,
+            items = collected,
+        }, error_message)
+    end
+    task = chester:DoPeriodicTask(0.1, function()
+        elapsed = elapsed + 0.1
+        if not player:IsValid() or player:HasTag("playerghost") then
+            finish(false, "玩家当前无法指挥小汤圆")
+            return
+        end
+        if current == nil or not current:IsValid() then
+            current = nil
+            local entities = GLOBAL.TheSim:FindEntities(center_x, 0, center_z, radius, nil, { "INLIMBO", "NOCLICK" })
+            local nearest_distance = nil
+            for _, entity in pairs(entities) do
+                if entity.prefab == "butterflywings" or entity.prefab == "butter" then
+                    local distance = chester:GetDistanceSqToInst(entity)
+                    if nearest_distance == nil or distance < nearest_distance then
+                        current = entity
+                        nearest_distance = distance
+                    end
+                end
+            end
+        end
+        if current == nil then
+            quiet_time = quiet_time + 0.1
+            if quiet_time >= 0.8 then
+                if #collected > 0 then
+                    finish(true, nil)
+                else
+                    finish(false, "蝴蝶没有留下可拾取的掉落物")
+                end
+            end
+            return
+        end
+        quiet_time = 0
+        if chester:GetDistanceSqToInst(current) <= 1.5 * 1.5 then
+            locomotor:Stop()
+            local prefab = current.prefab
+            if not container:GiveItem(current, nil, current:GetPosition(), false) then
+                finish(false, "小汤圆的容器已经满了")
+                return
+            end
+            table.insert(collected, prefab)
+            current = nil
+            return
+        end
+        if elapsed >= 8 then
+            finish(false, "小汤圆没能在时限内捡到掉落物")
+            return
+        end
+        locomotor:GoToPoint(current:GetPosition(), nil, true)
+    end)
+    player._chester_ai_skill_task = task
+end
+
+local function execute_skill_atom(player, command_id, atom, arguments)
+    if player == nil or player.userid == nil or player.Transform == nil or player:HasTag("playerghost") then
+        send_skill_result(player, command_id, false, nil, "玩家当前无法指挥小汤圆")
+        return
+    end
+    if player._chester_ai_skill_task ~= nil then
+        send_skill_result(player, command_id, false, nil, "小汤圆还在执行上一个原子动作")
+        return
+    end
+    if atom == "dst.find_nearest_butterfly" then
+        local radius = math.max(2, math.min(tonumber(arguments.radius) or 20, 25))
+        local target = find_nearest_butterfly(player, radius)
+        if target == nil then
+            send_skill_result(player, command_id, false, nil, "附近没有找到蝴蝶")
+            return
+        end
+        local x, _, z = target.Transform:GetWorldPosition()
+        send_skill_result(player, command_id, true, { targetId = target.GUID, x = x, z = z }, nil)
+    elseif atom == "dst.attack_butterfly" then
+        execute_attack_butterfly(player, command_id, arguments)
+    elseif atom == "dst.collect_butterfly_loot" then
+        execute_collect_butterfly_loot(player, command_id, arguments)
+    else
+        send_skill_result(player, command_id, false, nil, "Mod 不支持原子能力：" .. tostring(atom))
+    end
+end
+
+local function poll_skill_command()
+    local command = read_json(SKILL_COMMAND_PATH)
+    if type(command) ~= "table" or type(command.id) ~= "string" or command.id == last_skill_command_id then
+        return
+    end
+    last_skill_command_id = command.id
+    local rpc_namespace = MOD_RPC ~= nil and MOD_RPC[RPC_NAMESPACE] or nil
+    local rpc = rpc_namespace ~= nil and rpc_namespace["skill_atom"] or nil
+    if rpc == nil then
+        write_json(SKILL_RESULT_PATH, { id = command.id, success = false, error = "技能 RPC 不可用" })
+        return
+    end
+    local encoded_arguments = json.encode(type(command.arguments) == "table" and command.arguments or {})
+    local ok, send_error = pcall(SendModRPCToServer, rpc, command.id, command.atom, encoded_arguments)
+    if not ok then
+        write_json(SKILL_RESULT_PATH, { id = command.id, success = false, error = tostring(send_error) })
+    end
+end
+
 local function write_state()
     local state = build_state()
     if state ~= nil then
@@ -1185,6 +1437,25 @@ end)
 
 AddModRPCHandler(RPC_NAMESPACE, "chester_throw", function(player, target_x, target_z)
     throw_chester(player, target_x, target_z)
+end)
+
+AddModRPCHandler(RPC_NAMESPACE, "skill_atom", function(player, command_id, atom, encoded_arguments)
+    local ok, arguments = pcall(json.decode, encoded_arguments or "{}")
+    if not ok or type(arguments) ~= "table" then
+        send_skill_result(player, command_id, false, nil, "原子能力参数不是有效 JSON")
+        return
+    end
+    execute_skill_atom(player, command_id, atom, arguments)
+end)
+
+AddClientModRPCHandler(RPC_NAMESPACE, "skill_result", function(recipient_userid, encoded_result)
+    if GLOBAL.ThePlayer == nil or GLOBAL.ThePlayer.userid ~= recipient_userid then
+        return
+    end
+    local ok, result = pcall(json.decode, encoded_result or "{}")
+    if ok and type(result) == "table" then
+        write_json(SKILL_RESULT_PATH, result)
+    end
 end)
 
 local function send_status(status)
@@ -1841,6 +2112,9 @@ AddPrefabPostInit("world", function(inst)
                 .. "; error=" .. tostring(request_error)
         )
         inst:DoPeriodicTask(1, write_state, 1)
+        local existing_skill_command = read_json(SKILL_COMMAND_PATH)
+        last_skill_command_id = type(existing_skill_command) == "table" and existing_skill_command.id or nil
+        inst:DoPeriodicTask(0.1, poll_skill_command, 0.1)
         inst:DoTaskInTime(1, function()
             if install_voice_key_handlers() then
                 return

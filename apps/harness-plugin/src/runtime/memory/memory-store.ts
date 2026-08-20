@@ -5,7 +5,10 @@ import { DatabaseSync } from 'node:sqlite'
 import type { ResolvedConfig } from '../../config.js'
 import type {
   GameMemoryCandidate,
+  EditableSharedField,
+  GamePlayStatistics,
   MemoryIdentity,
+  PlayStatistics,
   RememberedGameEvent,
   SharedProfile,
   SharedProfilePatch,
@@ -149,6 +152,25 @@ export class MemoryStore {
       );
       CREATE INDEX IF NOT EXISTS game_memory_scope
         ON game_memory(profile_id, game_id, save_id, status, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS play_session (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        game_id TEXT NOT NULL,
+        save_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL,
+        ended_at INTEGER,
+        active_ms INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS play_session_scope
+        ON play_session(profile_id, game_id, save_id, last_seen_at DESC);
+      CREATE TABLE IF NOT EXISTS play_day (
+        profile_id TEXT NOT NULL,
+        game_id TEXT NOT NULL,
+        save_id TEXT NOT NULL,
+        local_day TEXT NOT NULL,
+        PRIMARY KEY(profile_id, game_id, save_id, local_day)
+      );
     `)
   }
 
@@ -168,6 +190,20 @@ export class MemoryStore {
       playStyles: uniqueStrings([...current.playStyles, ...(patch.playStyles ?? [])]),
       ...(patch.companionName === undefined ? {} : { companionName: patch.companionName.slice(0, 80) }),
       companionTraits: uniqueStrings([...current.companionTraits, ...(patch.companionTraits ?? [])]),
+    }
+    this.writeProfile(next)
+    return next
+  }
+
+  replaceSharedField(field: EditableSharedField, value: string | readonly string[] | undefined): SharedProfile {
+    const current = this.getSharedProfile()
+    const next = { ...current }
+    if (field === 'interests' || field === 'playStyles' || field === 'companionTraits') {
+      next[field] = uniqueStrings(Array.isArray(value) ? value : value === undefined ? [] : [value])
+    } else if (typeof value !== 'string' || value.trim() === '') {
+      delete next[field]
+    } else {
+      next[field] = value.trim().slice(0, field === 'responseStyle' ? 120 : 80)
     }
     this.writeProfile(next)
     return next
@@ -224,6 +260,112 @@ export class MemoryStore {
     return rows.map(rowToEvent)
   }
 
+  listAllGameMemory(limit = 500): RememberedGameEvent[] {
+    const rows = this.db.prepare(`
+      SELECT id, game_id, save_id, kind, subject, summary, importance, status, created_at, updated_at
+      FROM game_memory
+      WHERE profile_id = ? AND status = 'active'
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all(this.config.profileId, limit) as unknown as EventRow[]
+    return rows.map(rowToEvent)
+  }
+
+  deleteGameMemory(id: string): boolean {
+    return this.db.prepare('DELETE FROM game_memory WHERE profile_id = ? AND id = ?')
+      .run(this.config.profileId, id).changes > 0
+  }
+
+  beginPlaySession(id: string, identity: MemoryIdentity, now = Date.now()): void {
+    this.recordPlayedGame(identity.gameId)
+    this.db.prepare(`
+      INSERT OR IGNORE INTO play_session(id, profile_id, game_id, save_id, started_at, last_seen_at, active_ms)
+      VALUES (?, ?, ?, ?, ?, ?, 0)
+    `).run(id, this.config.profileId, identity.gameId, identity.saveId, now, now)
+    this.recordPlayDay(identity, now)
+  }
+
+  touchPlaySession(id: string, identity: MemoryIdentity, now = Date.now()): void {
+    const row = this.db.prepare(`
+      SELECT last_seen_at FROM play_session
+      WHERE id = ? AND profile_id = ? AND game_id = ? AND save_id = ?
+    `).get(id, this.config.profileId, identity.gameId, identity.saveId) as { last_seen_at?: unknown } | undefined
+    if (typeof row?.last_seen_at !== 'number') {
+      this.beginPlaySession(id, identity, now)
+      return
+    }
+    const activeDelta = Math.min(120_000, Math.max(0, now - row.last_seen_at))
+    this.db.prepare(`
+      UPDATE play_session
+      SET last_seen_at = ?, active_ms = active_ms + ?
+      WHERE id = ? AND profile_id = ?
+    `).run(now, activeDelta, id, this.config.profileId)
+    this.recordPlayDay(identity, now)
+  }
+
+  endPlaySession(id: string, identity: MemoryIdentity, now = Date.now()): void {
+    this.touchPlaySession(id, identity, now)
+    this.db.prepare('UPDATE play_session SET ended_at = ? WHERE id = ? AND profile_id = ?')
+      .run(now, id, this.config.profileId)
+  }
+
+  listPlayStatistics(): PlayStatistics[] {
+    const sessionRows = this.db.prepare(`
+      SELECT game_id, save_id, COUNT(*) AS session_count, SUM(active_ms) AS active_ms, MAX(last_seen_at) AS last_played_at
+      FROM play_session WHERE profile_id = ? GROUP BY game_id, save_id
+    `).all(this.config.profileId) as unknown as Array<Record<string, unknown>>
+    const dayRows = this.db.prepare(`
+      SELECT game_id, save_id, COUNT(*) AS play_days
+      FROM play_day WHERE profile_id = ? GROUP BY game_id, save_id
+    `).all(this.config.profileId) as unknown as Array<Record<string, unknown>>
+    const memoryRows = this.db.prepare(`
+      SELECT game_id, save_id, COUNT(*) AS memory_count
+      FROM game_memory WHERE profile_id = ? AND status = 'active' GROUP BY game_id, save_id
+    `).all(this.config.profileId) as unknown as Array<Record<string, unknown>>
+    const key = (row: Record<string, unknown>): string => `${String(row.game_id)}\u0000${String(row.save_id)}`
+    const days = new Map(dayRows.map(row => [key(row), Number(row.play_days)]))
+    const memories = new Map(memoryRows.map(row => [key(row), Number(row.memory_count)]))
+    return sessionRows.map(row => ({
+      gameId: String(row.game_id),
+      saveId: String(row.save_id),
+      sessionCount: Number(row.session_count),
+      playDays: days.get(key(row)) ?? 0,
+      activeMs: Number(row.active_ms),
+      lastPlayedAt: Number(row.last_played_at),
+      memoryCount: memories.get(key(row)) ?? 0,
+    })).sort((left, right) => right.lastPlayedAt - left.lastPlayedAt)
+  }
+
+  listGamePlayStatistics(): GamePlayStatistics[] {
+    const sessionRows = this.db.prepare(`
+      SELECT game_id, COUNT(DISTINCT save_id) AS save_count, COUNT(*) AS session_count,
+             SUM(active_ms) AS active_ms, MAX(last_seen_at) AS last_played_at
+      FROM play_session WHERE profile_id = ? GROUP BY game_id
+    `).all(this.config.profileId) as unknown as Array<Record<string, unknown>>
+    const dayRows = this.db.prepare(`
+      SELECT game_id, COUNT(DISTINCT local_day) AS play_days
+      FROM play_day WHERE profile_id = ? GROUP BY game_id
+    `).all(this.config.profileId) as unknown as Array<Record<string, unknown>>
+    const days = new Map(dayRows.map(row => [String(row.game_id), Number(row.play_days)]))
+    return sessionRows.map(row => ({
+      gameId: String(row.game_id),
+      saveCount: Number(row.save_count),
+      sessionCount: Number(row.session_count),
+      playDays: days.get(String(row.game_id)) ?? 0,
+      activeMs: Number(row.active_ms),
+      lastPlayedAt: Number(row.last_played_at),
+    })).sort((left, right) => right.lastPlayedAt - left.lastPlayedAt)
+  }
+
+  private recordPlayDay(identity: MemoryIdentity, now: number): void {
+    const date = new Date(now)
+    const localDay = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-')
+    this.db.prepare(`
+      INSERT OR IGNORE INTO play_day(profile_id, game_id, save_id, local_day)
+      VALUES (?, ?, ?, ?)
+    `).run(this.config.profileId, identity.gameId, identity.saveId, localDay)
+  }
+
   recall(identity: MemoryIdentity, query: string): string | undefined {
     const profile = this.getSharedProfile()
     const active = this.listGameMemory(identity, 100).filter(event => event.status === 'active')
@@ -253,6 +395,22 @@ export class MemoryStore {
 
   clearGameMemory(identity: MemoryIdentity): void {
     this.db.prepare('DELETE FROM game_memory WHERE profile_id = ? AND game_id = ? AND save_id = ?')
+      .run(this.config.profileId, identity.gameId, identity.saveId)
+  }
+
+  clearAllGameMemory(): void {
+    this.db.prepare('DELETE FROM game_memory WHERE profile_id = ?').run(this.config.profileId)
+  }
+
+  clearPlayStatistics(identity?: MemoryIdentity): void {
+    if (identity === undefined) {
+      this.db.prepare('DELETE FROM play_session WHERE profile_id = ?').run(this.config.profileId)
+      this.db.prepare('DELETE FROM play_day WHERE profile_id = ?').run(this.config.profileId)
+      return
+    }
+    this.db.prepare('DELETE FROM play_session WHERE profile_id = ? AND game_id = ? AND save_id = ?')
+      .run(this.config.profileId, identity.gameId, identity.saveId)
+    this.db.prepare('DELETE FROM play_day WHERE profile_id = ? AND game_id = ? AND save_id = ?')
       .run(this.config.profileId, identity.gameId, identity.saveId)
   }
 

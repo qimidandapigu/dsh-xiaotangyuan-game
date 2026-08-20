@@ -1,7 +1,7 @@
 {
   "name": "dsh-xiaotangyuan-game-workspace",
   "private": true,
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "XiaoTangYuan Game AI monorepo.",
   "scripts": {
     "build": "pnpm --filter @qimidandapigu/oni-adapter build && pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game build",
@@ -10,6 +10,9 @@
     "check:dst": "powershell -NoProfile -ExecutionPolicy Bypass -File games/dont-starve-together/scripts/check.ps1",
     "check:feedback": "pnpm --filter @qimidandapigu/xiaotangyuan-feedback-receiver check",
     "check:all": "pnpm run check && pnpm run check:feedback",
+    "eval:promptfoo": "node scripts/run-promptfoo.mjs eval -c evals/promptfoo/promptfooconfig.yaml",
+    "eval:promptfoo:contract": "node scripts/run-promptfoo.mjs eval -c evals/promptfoo/promptfooconfig.contract.yaml --no-cache",
+    "eval:promptfoo:view": "node scripts/run-promptfoo.mjs view",
     "pack:plugin": "pnpm --filter @qimidandapigu/dsh-xiaotangyuan-game pack",
     "pack:oni-adapter": "pnpm --filter @qimidandapigu/oni-adapter pack",
     "build:stardew": "dotnet build games/stardew-valley/adapter/StardewAgentMod.csproj -c Release",
@@ -17,5 +20,8 @@
     "build:oni": "dotnet build games/oxygen-not-included/bridge/DoubaoAI.ONI.csproj -c Release",
     "pack:oni": "powershell -NoProfile -ExecutionPolicy Bypass -File games/oxygen-not-included/bridge/tools/PackageRelease.ps1",
     "build:media": "dotnet publish apps/windows-media-host/XtyMediaHost.csproj -c Release -r win-x64 --self-contained true -o apps/harness-plugin/media/windows-x64"
+  },
+  "devDependencies": {
+    "promptfoo": "0.122.0"
   }
 }

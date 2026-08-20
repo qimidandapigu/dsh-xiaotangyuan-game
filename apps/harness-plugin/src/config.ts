@@ -47,6 +47,12 @@ export interface MemoryConfig {
   maxGameEntries?: number
 }
 
+export interface SkillConfig {
+  enabled?: boolean
+  directory?: string
+  activeLimit?: number
+}
+
 export interface DontStarveInstallerConfig {
   manifestUrl?: string
   archivePath?: string
@@ -64,6 +70,7 @@ export interface Config {
   media?: MediaConfig
   proactiveChat?: ProactiveChatConfig
   memory?: MemoryConfig
+  skills?: SkillConfig
   feedback?: FeedbackConfig
   installers?: InstallersConfig
 }
@@ -109,6 +116,11 @@ export interface ResolvedConfig {
     directory: string
     profileId: string
     maxGameEntries: number
+  }
+  skills: {
+    enabled: boolean
+    directory: string
+    activeLimit: number
   }
   installers: {
     dontStarve: {
@@ -164,6 +176,14 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
   const maxGameEntries = config.memory?.maxGameEntries ?? 300
   if (!Number.isInteger(maxGameEntries) || maxGameEntries < 50 || maxGameEntries > 2_000) {
     throw new Error('memory.maxGameEntries must be an integer between 50 and 2000')
+  }
+  const configuredSkillDirectory = config.skills?.directory?.trim()
+  if (configuredSkillDirectory !== undefined && !isAbsolute(configuredSkillDirectory)) {
+    throw new Error('skills.directory must be absolute')
+  }
+  const skillActiveLimit = config.skills?.activeLimit ?? 10
+  if (!Number.isInteger(skillActiveLimit) || skillActiveLimit < 1 || skillActiveLimit > 50) {
+    throw new Error('skills.activeLimit must be an integer between 1 and 50')
   }
 
   const feedbackEnabled = config.feedback?.enabled ?? false
@@ -250,6 +270,11 @@ export function resolveConfig(config: Config = {}): ResolvedConfig {
       directory: memoryDirectory,
       profileId: memoryProfileId,
       maxGameEntries,
+    },
+    skills: {
+      enabled: config.skills?.enabled ?? true,
+      directory: configuredSkillDirectory ?? memoryDirectory,
+      activeLimit: skillActiveLimit,
     },
     installers: {
       dontStarve: {

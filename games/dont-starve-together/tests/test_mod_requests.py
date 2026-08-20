@@ -1,5 +1,7 @@
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,8 +41,38 @@ class ModRequestTests(unittest.TestCase):
             request_file=root / "requests.json",
             reply_file=root / "reply.json",
             bridge_status_file=root / "bridge_status.json",
+            state_file=root / "state.json",
+            skill_command_file=root / "skill_command.json",
+            skill_result_file=root / "skill_result.json",
         )
         return ChesterApp(settings, gateway=gateway), gateway
+
+    def test_game_atom_bridge_waits_for_matching_lua_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app, _ = self.make_app(Path(directory))
+
+            def lua_side() -> None:
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    try:
+                        command = json.loads(app.settings.skill_command_file.read_text(encoding="utf-8"))
+                    except (FileNotFoundError, json.JSONDecodeError):
+                        time.sleep(0.01)
+                        continue
+                    app.settings.skill_result_file.write_text(
+                        json.dumps({"id": command["id"], "success": True, "result": {"targetId": 42}}),
+                        encoding="utf-8",
+                    )
+                    return
+
+            worker = threading.Thread(target=lua_side, daemon=True)
+            worker.start()
+            result = app._on_harness_request(
+                "game.atom.execute",
+                {"atom": "dst.find_nearest_butterfly", "arguments": {"radius": 20}},
+            )
+            worker.join(timeout=2)
+            self.assertEqual(result, {"targetId": 42})
 
     def test_reads_new_json_events_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -83,6 +115,18 @@ class ModRequestTests(unittest.TestCase):
                     ("voice.stop", {}),
                 ],
             )
+
+    def test_periodic_play_heartbeat_publishes_only_local_state_and_hashed_save_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            app, gateway = self.make_app(Path(directory))
+            state = {"save_id": "KU_world_session", "player": {"name": "Wilson"}}
+            app.settings.state_file.write_text(json.dumps(state), encoding="utf-8")
+            app._publish_play_heartbeat()
+            method, payload = gateway.notifications[0]
+            self.assertEqual(method, "state.update")
+            self.assertEqual(payload["observation"], state)
+            self.assertEqual(len(payload["saveId"]), 64)
+            self.assertNotIn("KU_world_session", payload["saveId"])
 
     def test_retry_routes_to_harness_in_a_background_thread(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

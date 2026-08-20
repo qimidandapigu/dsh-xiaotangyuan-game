@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { resolveConfig } from '../src/config.js'
-import { readAdapterHello, readStateUpdate } from '../src/protocol/game.js'
+import { readAdapterHello, readStateUpdate, readStateUpdateSaveId } from '../src/protocol/game.js'
 import { buildPcm16Wav } from '../src/runtime/speech/wav.js'
 
 describe('game runtime configuration', () => {
@@ -86,6 +86,12 @@ describe('game protocol extensions', () => {
     expect(readStateUpdate({ observation: { player: { health: 80 } } })).toEqual({
       player: { health: 80 },
     })
+  })
+
+  it('accepts a sanitized save identity beside state without placing it in observation', () => {
+    const update = { saveId: 'world-a1', observation: { player: { health: 80 } } }
+    expect(readStateUpdateSaveId(update)).toBe('world-a1')
+    expect(readStateUpdate(update)).not.toHaveProperty('saveId')
   })
 })
 

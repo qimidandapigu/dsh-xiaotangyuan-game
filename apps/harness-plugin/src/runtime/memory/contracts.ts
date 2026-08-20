@@ -50,17 +50,42 @@ export interface RememberedGameEvent extends GameMemoryCandidate {
   updatedAt: number
 }
 
+export interface PlayStatistics {
+  gameId: string
+  saveId: string
+  sessionCount: number
+  playDays: number
+  activeMs: number
+  lastPlayedAt: number
+  memoryCount: number
+}
+
+export interface GamePlayStatistics {
+  gameId: string
+  saveCount: number
+  sessionCount: number
+  playDays: number
+  activeMs: number
+  lastPlayedAt: number
+}
+
+export type EditableSharedField = Exclude<keyof SharedProfile, 'playedGames'>
+
 function opaqueSaveId(value: unknown): string | undefined {
   return typeof value === 'string' && /^[a-zA-Z0-9._:-]{1,128}$/.test(value) ? value : undefined
 }
 
-export function resolveMemoryIdentity(adapter: AdapterHello | undefined, request?: GameChatRequest): MemoryIdentity | undefined {
+export function resolveExplicitMemoryIdentity(adapter: AdapterHello | undefined, request?: GameChatRequest): MemoryIdentity | undefined {
   if (adapter === undefined) return undefined
   const observation = request?.context?.observation
   const saveId = opaqueSaveId(request?.context?.saveId)
     ?? opaqueSaveId(adapter.saveId)
     ?? opaqueSaveId(observation?.saveId)
     ?? opaqueSaveId(observation?.save_id)
-    ?? 'default'
-  return { gameId: adapter.gameId, saveId }
+  return saveId === undefined ? undefined : { gameId: adapter.gameId, saveId }
+}
+
+export function resolveMemoryIdentity(adapter: AdapterHello | undefined, request?: GameChatRequest): MemoryIdentity | undefined {
+  if (adapter === undefined) return undefined
+  return resolveExplicitMemoryIdentity(adapter, request) ?? { gameId: adapter.gameId, saveId: 'default' }
 }

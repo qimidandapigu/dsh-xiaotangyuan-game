@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -5,8 +6,10 @@ import type { AdapterHello, GameChatRequest } from '../../protocol/game.js'
 import type { ResolvedConfig } from '../../config.js'
 import {
   GAME_MEMORY_KINDS,
+  resolveExplicitMemoryIdentity,
   resolveMemoryIdentity,
   type GameMemoryCandidate,
+  type MemoryIdentity,
   type MemoryExtraction,
   type SharedProfilePatch,
 } from './contracts.js'
@@ -23,6 +26,26 @@ Rules:
 - Do not store ordinary chatter, raw game state, transient conditions, secrets, paths, account IDs, or facts recoverable from the current screenshot/state.
 - Prefer no memory over an uncertain memory. At most one shared change and two game memories.
 - Each string must be concise; game summary <= 160 characters.`
+
+const SESSION_SUMMARY_SYSTEM_PROMPT = `You consolidate one completed game play session into durable game/save memories.
+Return exactly one JSON object and no markdown:
+{"shared":null,"gameMemories":[{"kind":"goal"|"preference"|"relationship"|"decision"|"milestone"|"promise","subject":string,"summary":string,"importance":1|2|3|4|5}]}
+Keep at most two items. Preserve only unfinished goals, explicit decisions, promises, relationship changes, or meaningful milestones.
+Do not save ordinary chatter, current status, screenshots, secrets, paths, account IDs, or facts that can be read from the game again.
+Prefer an empty gameMemories array over uncertain or duplicate memories.`
+
+interface ActivePlaySession {
+  storageId: string
+  adapter: AdapterHello
+  identity?: MemoryIdentity
+  lastPersistedAt: number
+  transcript: string[]
+  selection?: ModelSelection
+}
+
+function sameIdentity(left: MemoryIdentity | undefined, right: MemoryIdentity | undefined): boolean {
+  return left?.gameId === right?.gameId && left?.saveId === right?.saveId
+}
 
 function cleanString(value: unknown, maximum: number): string | undefined {
   if (typeof value !== 'string') return undefined
@@ -92,6 +115,7 @@ function extractionInput(adapter: AdapterHello, request: GameChatRequest, reply:
 export class MemoryService {
   readonly store: MemoryStore
   private learningQueue: Promise<void> = Promise.resolve()
+  private readonly playSessions = new Map<string, ActivePlaySession>()
   private closing = false
 
   constructor(
@@ -101,9 +125,41 @@ export class MemoryService {
     this.store = new MemoryStore(config)
   }
 
-  adapterConnected(adapter: AdapterHello): void {
+  adapterConnected(sessionKey: string, adapter: AdapterHello): void {
     if (!this.config.enabled) return
     this.store.recordPlayedGame(adapter.gameId)
+    const active: ActivePlaySession = {
+      storageId: randomUUID(),
+      adapter,
+      identity: resolveExplicitMemoryIdentity(adapter),
+      lastPersistedAt: Date.now(),
+      transcript: [],
+    }
+    this.playSessions.set(sessionKey, active)
+    if (active.identity !== undefined) this.store.beginPlaySession(active.storageId, active.identity, active.lastPersistedAt)
+  }
+
+  observeSession(sessionKey: string, adapter: AdapterHello | undefined, request?: GameChatRequest): void {
+    if (!this.config.enabled || adapter === undefined || this.closing) return
+    let active = this.playSessions.get(sessionKey)
+    if (active === undefined) {
+      this.adapterConnected(sessionKey, adapter)
+      active = this.playSessions.get(sessionKey)
+    }
+    if (active === undefined) return
+    const identity = resolveExplicitMemoryIdentity(adapter, request)
+    if (identity !== undefined && !sameIdentity(active.identity, identity)) {
+      this.finishActiveSession(active, Date.now())
+      active = {
+        storageId: randomUUID(), adapter, identity, lastPersistedAt: Date.now(), transcript: [],
+      }
+      this.playSessions.set(sessionKey, active)
+      this.store.beginPlaySession(active.storageId, identity, active.lastPersistedAt)
+      return
+    }
+    if (active.identity === undefined || Date.now() - active.lastPersistedAt < 15_000) return
+    active.lastPersistedAt = Date.now()
+    this.store.touchPlaySession(active.storageId, active.identity, active.lastPersistedAt)
   }
 
   recall(adapter: AdapterHello | undefined, request: GameChatRequest): string | undefined {
@@ -112,7 +168,16 @@ export class MemoryService {
     return identity === undefined ? undefined : this.store.recall(identity, request.text)
   }
 
+  activeIdentities(): MemoryIdentity[] {
+    const unique = new Map<string, MemoryIdentity>()
+    for (const active of this.playSessions.values()) {
+      if (active.identity !== undefined) unique.set(`${active.identity.gameId}\u0000${active.identity.saveId}`, active.identity)
+    }
+    return [...unique.values()]
+  }
+
   scheduleLearn(
+    sessionKey: string,
     adapter: AdapterHello | undefined,
     request: GameChatRequest,
     reply: string,
@@ -120,8 +185,15 @@ export class MemoryService {
     selection: ModelSelection,
   ): void {
     if (!this.config.enabled || !this.config.autoLearn || this.closing || adapter === undefined) return
+    this.observeSession(sessionKey, adapter, request)
     const identity = resolveMemoryIdentity(adapter, request)
     if (identity === undefined) return
+    const active = this.playSessions.get(sessionKey)
+    if (active !== undefined) {
+      active.selection = selection
+      active.transcript.push(`Player: ${request.text.slice(0, 800)}\nCompanion: ${reply.slice(0, 800)}`)
+      while (active.transcript.length > 12) active.transcript.shift()
+    }
     this.learningQueue = this.learningQueue
       .then(async () => {
         const extraction = await this.extract(adapter, request, reply, selection)
@@ -134,23 +206,57 @@ export class MemoryService {
       })
   }
 
+  endSession(sessionKey: string): void {
+    const active = this.playSessions.get(sessionKey)
+    if (active === undefined) return
+    this.playSessions.delete(sessionKey)
+    this.finishActiveSession(active, Date.now())
+  }
+
+  private finishActiveSession(active: ActivePlaySession, now: number): void {
+    if (active.identity !== undefined) this.store.endPlaySession(active.storageId, active.identity, now)
+    if (!this.config.autoLearn || active.identity === undefined || active.selection === undefined || active.transcript.length < 2) return
+    const snapshot = { ...active, transcript: [...active.transcript] }
+    this.learningQueue = this.learningQueue
+      .then(async () => {
+        const extraction = await this.extractSessionSummary(snapshot)
+        this.store.remember(snapshot.identity!, extraction.gameMemories, `session:${snapshot.storageId}`)
+      })
+      .catch(error => {
+        this.ctx.logger.warn('xiaotangyuan-game: 游玩阶段总结失败，已有记忆和统计不受影响')
+        this.ctx.logger.warn(error)
+      })
+  }
+
   private async extract(
     adapter: AdapterHello,
     request: GameChatRequest,
     reply: string,
     selection: ModelSelection,
   ): Promise<MemoryExtraction> {
+    return await this.extractWithPrompt(EXTRACTION_SYSTEM_PROMPT, extractionInput(adapter, request, reply), selection)
+  }
+
+  private async extractSessionSummary(active: ActivePlaySession): Promise<MemoryExtraction> {
+    return await this.extractWithPrompt(
+      SESSION_SUMMARY_SYSTEM_PROMPT,
+      [`Game: ${active.adapter.gameId}`, `Completed session transcript:\n${active.transcript.join('\n\n')}`].join('\n'),
+      active.selection!,
+    )
+  }
+
+  private async extractWithPrompt(system: string, input: string, selection: ModelSelection): Promise<MemoryExtraction> {
     const assembler = new BlockAssembler()
     const signal = AbortSignal.timeout(45_000)
     const messages = [createUserMessage({
-      content: [{ type: 'text', text: extractionInput(adapter, request, reply) }],
+      content: [{ type: 'text', text: input }],
       source: { kind: 'user' },
     })]
     for await (const chunk of this.ctx.llm.stream({
       provider: selection.provider,
       model: selection.model,
       messages,
-      system: EXTRACTION_SYSTEM_PROMPT,
+      system,
       temperature: 0,
       maxTokens: 700,
       signal,
@@ -165,7 +271,12 @@ export class MemoryService {
 
   async close(): Promise<void> {
     this.closing = true
+    for (const sessionKey of [...this.playSessions.keys()]) this.endSession(sessionKey)
     await this.learningQueue
     this.store.close()
+  }
+
+  async flush(): Promise<void> {
+    await this.learningQueue
   }
 }

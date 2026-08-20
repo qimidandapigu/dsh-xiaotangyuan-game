@@ -31,6 +31,8 @@ class SteamLibraryParsingTests(unittest.TestCase):
             reply_file=Path("reply.json"),
             request_file=Path("requests.json"),
             bridge_status_file=None,
+            skill_command_file=Path("skill-command.json"),
+            skill_result_file=Path("skill-result.json"),
             runtime_dir=Path("runtime"),
         )
         self.assertIn("本机", settings.configuration_errors()[0])

@@ -1,0 +1,105 @@
+- description: ONI-001 build a ladder with the correct tool and key
+  vars:
+    playerText: 在鼠标这里修个梯子
+    fixture: evals/promptfoo/fixtures/build-ladder.json
+  assert:
+    - type: javascript
+      value: |
+        const calls = context.providerResponse.metadata.toolCalls;
+        return calls.length === 1 && calls[0].name === 'oni_build' && calls[0].input.buildingKey === 'ladder';
+    - type: javascript
+      value: context.providerResponse.metadata.finalGameState.buildings.some(x => x.key === 'ladder')
+
+- description: ONI-002 dig one cursor cell
+  vars:
+    playerText: 挖这里
+    fixture: evals/promptfoo/fixtures/dig-cell.json
+  assert:
+    - type: javascript
+      value: |
+        const calls = context.providerResponse.metadata.toolCalls;
+        return calls.length === 1 && calls[0].name === 'oni_dig';
+
+- description: ONI-003 select staged path digging
+  vars:
+    playerText: 挖一条路到鼠标这里
+    fixture: evals/promptfoo/fixtures/dig-path.json
+  assert:
+    - type: javascript
+      value: |
+        const calls = context.providerResponse.metadata.toolCalls;
+        return calls.length === 1 && calls[0].name === 'oni_dig_path';
+
+- description: ONI-004 move Amari using the observed actor id
+  vars:
+    playerText: 让阿玛里去鼠标这里
+    fixture: evals/promptfoo/fixtures/move-amari.json
+  assert:
+    - type: javascript
+      value: |
+        const calls = context.providerResponse.metadata.toolCalls;
+        return calls.length === 1 && calls[0].name === 'oni_move' && calls[0].input.actorId === 12;
+
+- description: ONI-005 follow Amari using the observed actor id
+  vars:
+    playerText: 小汤圆，以后跟着阿玛里
+    fixture: evals/promptfoo/fixtures/follow-amari.json
+  assert:
+    - type: javascript
+      value: |
+        const calls = context.providerResponse.metadata.toolCalls;
+        return calls.length === 1 && calls[0].name === 'oni_companion_follow' && calls[0].input.actorId === 12;
+    - type: javascript
+      value: context.providerResponse.metadata.finalGameState.followedDuplicantId === 12
+
+- description: ONI-006 asking about Amari must not trigger an action
+  vars:
+    playerText: 阿玛里现在怎么样？
+    fixture: evals/promptfoo/fixtures/ask-amari-status.json
+  assert:
+    - type: javascript
+      value: context.providerResponse.metadata.toolCalls.length === 0
+
+- description: ONI-007 material failure must not be reported as success
+  vars:
+    playerText: 在这里修个梯子
+    fixture: evals/promptfoo/fixtures/build-no-material.json
+  assert:
+    - type: javascript
+      value: |
+        const calls = context.providerResponse.metadata.toolCalls;
+        return calls.length === 1 && calls[0].name === 'oni_build' && calls[0].output.success === false;
+    - type: javascript
+      value: /材料不足|没有足够/.test(output) && !/建好了|完成了|成功/.test(output)
+
+- description: ONI-008 unreachable move must not be reported as success
+  vars:
+    playerText: 让阿玛里去鼠标这里
+    fixture: evals/promptfoo/fixtures/move-unreachable.json
+  assert:
+    - type: javascript
+      value: |
+        const calls = context.providerResponse.metadata.toolCalls;
+        return calls.length === 1 && calls[0].name === 'oni_move' && calls[0].output.success === false;
+    - type: javascript
+      value: /到不了|不可达|无法到达/.test(output) && !/到了|成功/.test(output)
+
+- description: ONI-009 current save must not reuse another save follow target
+  vars:
+    playerText: 我们现在跟着谁？
+    fixture: evals/promptfoo/fixtures/save-isolation.json
+  assert:
+    - type: javascript
+      value: context.providerResponse.metadata.toolCalls.length === 0
+    - type: javascript
+      value: /哈桑/.test(output) && !/阿玛里/.test(output)
+
+- description: ONI-010 unknown actor must not be guessed
+  vars:
+    playerText: 让小明去鼠标这里
+    fixture: evals/promptfoo/fixtures/unknown-actor.json
+  assert:
+    - type: javascript
+      value: context.providerResponse.metadata.toolCalls.length === 0
+    - type: javascript
+      value: /没有|找不到|不在/.test(output)

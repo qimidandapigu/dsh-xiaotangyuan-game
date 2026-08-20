@@ -13,6 +13,9 @@ import { SpeechController } from './runtime/speech/speech-controller.js'
 import { VolcengineSpeechProvider } from './runtime/speech/volcengine-speech-provider.js'
 import { registerGameTools } from './tools/game-mod-tools.js'
 import { MemoryService } from './runtime/memory/memory-service.js'
+import { registerMemoryTools } from './tools/memory-tools.js'
+import { SkillStore } from './runtime/skills/skill-store.js'
+import { SkillService } from './runtime/skills/skill-service.js'
 
 export const name = 'dsh-xiaotangyuan-game'
 export const inject = ['agentDefaultModel', 'agents', 'attachments', 'credentials', 'llm', 'sessions', 'tools']
@@ -20,12 +23,14 @@ export const inject = ['agentDefaultModel', 'agents', 'attachments', 'credential
 export function apply(ctx: Context, config: Config = {}): void {
   const resolved = resolveConfig(config)
   const feedback = resolved.feedback.enabled ? new SignedFeedbackClient(ctx, resolved.feedback) : undefined
+  const memory = resolved.memory.enabled ? new MemoryService(ctx, resolved.memory) : undefined
+  const skills = resolved.skills.enabled ? new SkillService(new SkillStore(resolved.skills)) : undefined
   registerGameTools(ctx, feedback, resolved.installers.dontStarve)
+  if (memory !== undefined) registerMemoryTools(ctx, memory)
 
   ctx.effect(() => {
     const media = new WindowsMediaHost(ctx, resolved.media)
     const multimodal = new MultimodalRouter(ctx, resolved.vision, media)
-    const memory = resolved.memory.enabled ? new MemoryService(ctx, resolved.memory) : undefined
     let speech: SpeechController | undefined
     const gateway = new GameGateway(
       ctx,
@@ -33,6 +38,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       resolved.port,
       multimodal,
       memory,
+      skills,
       resolved.proactiveChat,
       processIds => speech?.updateTargets(processIds),
       feedback !== undefined,

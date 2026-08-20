@@ -9,6 +9,7 @@
 - 适配器必须先发送一次 `adapter.hello`，然后才能发送其他请求。
 - Windows 语音适配器应在 `adapter.hello` 中提供正整数 `processId`，让媒体 Host 只响应已连接且位于前台的游戏进程。
 - 支持存档隔离的适配器应在 `adapter.hello.saveId` 或每次 `chat.send.context.saveId` 中提供稳定、不透明的本地标识。只允许 1–128 个字母、数字、点、下划线、冒号或连字符；不得发送存档路径、平台账号或用户名。
+- 需要记录无对话游玩统计的适配器可在 `state.update.saveId` 重复携带同一个不透明标识。Harness 只用它切换本地统计与记忆作用域，不把该标识或完整 observation 写进长期记忆。
 
 ## 当前方法
 
