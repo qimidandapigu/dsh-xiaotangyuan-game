@@ -18,6 +18,11 @@ import type { ResolvedConfig } from '../config.js'
 import type { MemoryService } from '../runtime/memory/memory-service.js'
 import type { SkillService } from '../runtime/skills/skill-service.js'
 import type { SkillValue } from '../runtime/skills/contracts.js'
+import { normalizeGameContext } from '../runtime/context/game-context.js'
+
+function normalizeContextObservation(context: GameChatContext | undefined, adapter: AdapterHello | undefined): void {
+  if (context?.observation !== undefined) context.observation = normalizeGameContext(context.observation, adapter).value
+}
 
 interface PendingAdapterRequest {
   resolve: (value: unknown) => void
@@ -196,6 +201,7 @@ export class GameGateway implements VoiceInteractionHandler {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before chat.send')
         this.markInteraction(state)
         const chat = readGameChat(request.params)
+        normalizeContextObservation(chat.context, state.adapter)
         if (chat.context?.saveId !== undefined) state.latestSaveId = chat.context.saveId
         if (chat.context?.observation !== undefined) state.latestObservation = chat.context.observation
         const result = await state.session.ask(chat)
@@ -206,6 +212,7 @@ export class GameGateway implements VoiceInteractionHandler {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before chat.retry')
         this.markInteraction(state)
         const retry = readGameRetry(request.params)
+        normalizeContextObservation(retry.context, state.adapter)
         if (retry.context?.saveId !== undefined) state.latestSaveId = retry.context.saveId
         if (retry.context?.observation !== undefined) state.latestObservation = retry.context.observation
         const result = await state.session.retry(retry.context)
@@ -221,12 +228,13 @@ export class GameGateway implements VoiceInteractionHandler {
         if (state.session === undefined) throw new Error('adapter.hello must be sent before assistant.compose')
         this.markInteraction(state)
         const chat = readGameChat(request.params)
+        normalizeContextObservation(chat.context, state.adapter)
         if (chat.context?.saveId !== undefined) state.latestSaveId = chat.context.saveId
         if (chat.context?.observation !== undefined) state.latestObservation = chat.context.observation
         return await state.session.compose(chat)
       }
       case 'state.update': {
-        state.latestObservation = readStateUpdate(request.params)
+        state.latestObservation = normalizeGameContext(readStateUpdate(request.params), state.adapter).value
         const saveId = readStateUpdateSaveId(request.params)
         if (saveId !== undefined) state.latestSaveId = saveId
         this.memory?.observeSession(state.memorySessionKey, state.adapter, {
@@ -288,7 +296,9 @@ export class GameGateway implements VoiceInteractionHandler {
     args: Record<string, SkillValue>,
     signal: AbortSignal,
   ): Promise<unknown> {
-    if (state.adapter?.capabilities?.includes(atom) !== true) throw new Error(`Adapter 未声明原子能力：${atom}`)
+    const declared = state.adapter?.atoms?.some(definition => definition.name === atom) === true
+      || state.adapter?.capabilities?.includes(atom) === true
+    if (!declared) throw new Error(`Adapter 未声明原子能力：${atom}`)
     if (state.socket.readyState !== WebSocket.OPEN) throw new Error('游戏 Adapter 未连接')
     const id = randomUUID()
     return await new Promise<unknown>((resolve, reject) => {

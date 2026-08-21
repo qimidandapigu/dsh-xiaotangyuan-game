@@ -1,6 +1,6 @@
 # XiaoTangYuan Promptfoo evals
 
-This first version defines ten high-value ONI scenarios and the response contract expected from a real XiaoTangYuan Harness evaluator.
+This suite defines high-value ONI and Don't Starve Together scenarios and the response contract expected from a real XiaoTangYuan Harness evaluator.
 
 ## What the two commands mean
 

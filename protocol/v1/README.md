@@ -17,8 +17,8 @@
 |---|---|---|
 | `adapter.hello` | 适配器 → Harness | 声明适配器、游戏、版本和协议版本 |
 | `gateway.ping` | 适配器 → Harness | 检查 Gateway 是否正常 |
-| `chat.send` | 适配器 → Harness | 发送玩家文本和少量结构化游戏上下文 |
-| `state.update` | 适配器 → Harness | 上报最新结构化游戏状态，不包含音频和密钥 |
+| `chat.send` | 适配器 → Harness | 发送玩家文本和 `XTY Game Context v1` |
+| `state.update` | 适配器 → Harness | 上报最新 `xty.game-context.v1` 状态，不包含音频和密钥 |
 | `voice.start` | 适配器 → Harness | 让 Harness 为当前 Adapter 声明的游戏进程开始录音 |
 | `voice.stop` | 适配器 → Harness | 停止同一游戏进程发起的录音并进入 ASR、Agent 与 TTS 链路 |
 | `assistant.status` | Harness → 适配器 | 显示录音、转写或思考状态 |
@@ -57,7 +57,7 @@ Adapter 应使用 `text` 替换正在显示的临时气泡，而不是自行拼�
 
 ## 后续扩展
 
-当前已经支持 `state.update` 结构化观察。后续协议将增加：
+当前统一状态格式见 [XTY Game Context v1](../../docs/GAME_CONTEXT_V1.md)。Harness 会兼容转换三个游戏的旧 observation，新 Adapter 必须直接发送 `xty.game-context.v1`。后续协议将增加：
 
 - 游戏事件上报。
 - 游戏工具发现。

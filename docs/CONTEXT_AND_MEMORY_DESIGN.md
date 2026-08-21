@@ -1,20 +1,20 @@
 # 结构化状态与记忆隔离设计
 
-本文同时记录设计边界和当前实现状态。`0.7.6` 已启用持久记忆、后台自动提取、游玩统计、阶段总结、自然语言管理及 `gameId + saveId` 隔离；结构化 `modelContext` 白名单仍是后续工作。目标是让模型获得少量真正有用的事实，同时确保原始世界状态留在本机、不同游戏和存档的记忆不会串线。
+本文同时记录设计边界和当前实现状态。Harness 已启用持久记忆、后台自动提取、游玩统计、阶段总结、自然语言管理、`gameId + saveId` 隔离及 `XTY Game Context v1`。目标是让模型获得经过白名单整理的当前事实，同时确保原始世界状态留在游戏本地、不同游戏和存档的记忆不会串线。
 
 ## 设计总览
 
 ```text
 游戏 Bridge / Mod
-├─ full observation       完整状态，仅供本地动作与校验
-└─ save identity hint     不含路径和平台账号
+├─ full local state       完整状态，仅供本地动作与校验
+└─ curated facts          读取游戏 API 后的必要事实
             ↓ 本机
 游戏 Adapter
-├─ 确定性地裁剪 modelContext
+├─ 输出 XTY Game Context v1
 └─ 生成不透明 saveId
             ↓ protocol/v1（有上限）
 Harness
-├─ 校验并注入少量 modelContext
+├─ 校验、兼容转换、限长并注入 Game Context
 ├─ 按 scope 读取、写入记忆
 └─ 截图 + 玩家文字 + 少量事实 → 单次多模态模型
 ```
@@ -25,15 +25,18 @@ Harness
 
 ### 1. 两份状态，各自负责一件事
 
-Adapter 可以在本机保留完整 `observation`，供寻路、目标 ID、动作前置条件和结果校验使用。它不应默认进入模型提示词，也不应被 Harness 持久化。
+Adapter 可以在本机保留完整游戏状态，供寻路、目标 ID、动作前置条件和结果校验使用。完整状态不进入模型提示词，也不被 Harness 持久化。
 
-Adapter 另外生成 `modelContext`。它只能由白名单字段组成，用来补充截图不容易准确识别、但对当前回答有帮助的事实。例如生命值、所在区域、当前工具和鼠标指向对象。
+Adapter 另外生成 `xty.game-context.v1`。它只能由统一 Core 和游戏命名空间扩展组成，用来补充截图不容易准确识别、但对当前回答有帮助的事实。例如生命值、所在区域、当前工具和鼠标指向对象。完整字段见 [XTY Game Context v1](GAME_CONTEXT_V1.md)。
 
 ```json
 {
-  "schemaVersion": 1,
-  "capturedAt": "2026-08-18T12:00:00.000Z",
-  "world": {
+  "schema": "xty.game-context.v1",
+  "meta": {
+    "gameId": "stardew-valley",
+    "capturedAt": "2026-08-18T12:00:00.000Z"
+  },
+  "scene": {
     "location": "Farm",
     "time": "08:10",
     "season": "spring",
@@ -45,31 +48,24 @@ Adapter 另外生成 `modelContext`。它只能由白名单字段组成，用来
     "status": ["hungry"],
     "heldItem": "Fishing Rod"
   },
-  "focus": {
-    "kind": "water",
-    "name": "farm pond",
-    "reachable": true
-  },
-  "nearby": [
+  "entities": [
     { "kind": "npc", "name": "Abigail", "distance": 4 }
   ],
-  "relevantItems": [
-    { "name": "Bait", "count": 18 }
-  ],
-  "ui": { "busy": false, "menu": null }
+  "objectives": [],
+  "ui": { "playerControllable": true }
 }
 ```
 
-所有字段都是可选的。Adapter 不知道或游戏不支持的字段直接省略，不使用大段自然语言 `summary` 补齐。
+除 Schema 标识、`meta.gameId`、`meta.capturedAt` 和几个 Core 容器外，业务字段均可省略。Adapter 不知道或游戏不支持的字段直接省略，不使用大段自然语言 `summary` 猜测补齐。
 
 ### 2. 硬性数据预算
 
 Harness 在接收时执行统一限制：
 
-- 序列化后目标不超过 `2 KiB`，硬上限 `6 KiB`。
-- JSON 最大深度 `4`；数组最多 `8` 项；`nearby` 最多 `5` 项。
-- 单个字符串最多 `200` 字符，不接受任意嵌套对象和自由文本日志。
-- 超限时拒绝这份 `modelContext` 并记录字段名，不截断成可能误导模型的半份状态。
+- 模型提示中的结构化 JSON 硬上限 `12,000` 字符。
+- JSON 最大深度 `6`；实体最多 `40` 项；目标最多 `20` 项。
+- 普通字符串最多 `500` 字符，身份和名称字段使用更小上限。
+- 超限时先移除游戏扩展，再把实体缩减到 `12` 项，并明确标记 `truncated`。
 - 每次玩家交互最多注入一份最新状态；不传状态历史，不逐帧上报。
 - `capturedAt` 超过 `5` 秒时标记为 stale；超过 `30` 秒时不注入模型。
 
@@ -77,7 +73,7 @@ Harness 在接收时执行统一限制：
 
 ### 3. 默认禁止上传的内容
 
-以下内容既不进入 `modelContext`，也不随模型请求发送：
+以下内容既不进入 `XTY Game Context`，也不随模型请求发送：
 
 - 存档文件、完整世界快照、完整背包、完整任务列表和 NPC 关系数据库。
 - Windows 用户名、文件路径、Steam 或游戏平台账号 ID、进程 ID。
@@ -85,20 +81,20 @@ Harness 在接收时执行统一限制：
 - 桌面截图、后台窗口、连续视频帧；只使用当前允许游戏进程的客户区截图。
 - 原始音频；语音仍在本机完成 ASR 后只把转写文本交给 Agent。
 
-动作工具仍必须使用本机完整 observation 二次校验。`modelContext` 只是回答依据，不能作为执行危险动作的授权或唯一事实来源。
+动作工具仍必须使用本机完整状态二次校验。`XTY Game Context` 只是回答依据，不能作为执行危险动作的授权或唯一事实来源。
 
-### 4. 建议的协议形态
+### 4. 当前协议形态
 
-后续让 `chat.send.context` 和 `state.update` 只承载允许出本地动作层的数据：
+`chat.send.context` 和 `state.update` 只承载允许离开本地动作层的数据：
 
 ```json
 {
-  "modelContext": { "schemaVersion": 1 },
-  "identity": { "gameId": "stardew-valley", "saveId": "opaque-local-id" }
+  "observation": { "schema": "xty.game-context.v1" },
+  "saveId": "opaque-local-id"
 }
 ```
 
-完整 `localObservation` 不出 Adapter 的本地动作层。协议层只接受 `modelContext` 和不透明身份键。现有 `context.observation` 保留一个兼容周期，但 Harness 不把它拼进模型提示词；迁移完成后弃用。
+完整本地状态不出 Adapter 的动作层。协议层只接受标准 Context 和不透明身份键。现有三个旧 observation 保留一个兼容周期，由 Harness 转换为 `xty.game-context.v1`；新 Adapter 不得再创建私有顶层结构。
 
 ## 二、简化后的记忆隔离
 
@@ -198,7 +194,8 @@ DeepSeek Harness 仍处于 Developer Preview，可能发生破坏性 API 变化�
 2. 已完成：共同 Profile、游戏事件检索、跨游戏/跨存档隔离测试。
 3. 已完成：回答后后台提取、去重、容量限制、游玩统计和退出阶段总结。
 4. 已完成：共同记忆/当前游戏记忆的自然语言查看、纠正和删除工具。
-5. 后续：接入 Adapter 的少量 `modelContext`，增加人类可读存档名称，并用长期固定测试集持续衡量错误记忆、Prompt token 和响应延迟。
+5. 已完成：接入 `XTY Game Context v1`、旧格式转换、统一限长和模型提示词注入。
+6. 后续：增加人类可读存档名称，并用长期固定测试集持续衡量错误记忆、Prompt token 和响应延迟。
 
 验收底线：切换游戏或存档后，上一游戏或上一存档的人物、地点和经历不能出现在新上下文；稳定的玩家画像、爱好和一起玩过的游戏可以作为共同记忆继续使用，同时必须允许玩家查看和纠正。
 

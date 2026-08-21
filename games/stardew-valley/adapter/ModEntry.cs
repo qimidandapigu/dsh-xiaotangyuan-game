@@ -16,6 +16,7 @@ public sealed class ModEntry : Mod
 {
     private readonly ConcurrentQueue<Action> mainThreadActions = new();
     private CompanionLocator companion = null!;
+    private CompanionGrowthSystem growth = null!;
     private SpeechBubble speechBubble = null!;
     private ModConfig config = null!;
     private GameAgentClient client = null!;
@@ -27,6 +28,7 @@ public sealed class ModEntry : Mod
     {
         this.config = helper.ReadConfig<ModConfig>();
         this.companion = new CompanionLocator(helper, this.Monitor);
+        this.growth = new CompanionGrowthSystem(this.companion, this.Monitor);
         this.speechBubble = new SpeechBubble(this.companion.TryGetWorldPosition);
         this.client = new GameAgentClient(this.config.GatewayUrl);
         this.client.AssistantStreaming += text => this.mainThreadActions.Enqueue(() =>
@@ -71,6 +73,7 @@ public sealed class ModEntry : Mod
         helper.Events.GameLoop.DayStarted += this.OnDayStarted;
         helper.Events.Display.RenderedWorld += this.OnRenderedWorld;
         helper.Events.GameLoop.ReturnedToTitle += this.OnReturnedToTitle;
+        helper.ConsoleCommands.Add("xty_growth", "查看小汤圆的三条成长分支进度。", this.OnGrowthCommand);
 
         this.Monitor.Log(
             $"小汤圆星露谷适配器已加载。按 {this.config.TextChatKey} 输入文字；在游戏为前台时按住 F8 进行 Harness 语音对话。",
@@ -93,7 +96,7 @@ public sealed class ModEntry : Mod
         text = text.Trim();
         if (text.Length == 0) return;
 
-        this.latestObservation = GameObservationBuilder.Capture();
+        this.latestObservation = GameObservationBuilder.Capture(this.growth.GetSnapshot());
         object context = new { observation = this.latestObservation };
         this.textRequestInFlight = true;
         Game1.addHUDMessage(new HUDMessage("小汤圆正在观察和思考……", HUDMessage.newQuest_type));
@@ -128,8 +131,10 @@ public sealed class ModEntry : Mod
 
     private void OnOneSecondUpdateTicked(object? sender, OneSecondUpdateTickedEventArgs e)
     {
-        if (!Context.IsWorldReady || this.observationInFlight) return;
-        this.latestObservation = GameObservationBuilder.Capture();
+        if (!Context.IsWorldReady) return;
+        this.growth.Update();
+        if (this.observationInFlight) return;
+        this.latestObservation = GameObservationBuilder.Capture(this.growth.GetSnapshot());
         this.observationInFlight = true;
         _ = this.PublishObservationAsync(this.latestObservation);
     }
@@ -168,12 +173,12 @@ public sealed class ModEntry : Mod
             Game1.uniqueIDForThisGame.ToString(CultureInfo.InvariantCulture)
         ));
         this.client.SetSaveId(Convert.ToHexString(digest).ToLowerInvariant());
-        this.companion.ApplyEnabled(this.config.ShowCompanion);
+        this.growth.OnSaveLoaded(this.config.ShowCompanion);
     }
 
     private void OnDayStarted(object? sender, DayStartedEventArgs e)
     {
-        this.companion.ApplyEnabled(this.config.ShowCompanion);
+        this.growth.OnDayStarted(this.config.ShowCompanion);
     }
 
     private void OnReturnedToTitle(object? sender, ReturnedToTitleEventArgs e)
@@ -183,5 +188,19 @@ public sealed class ModEntry : Mod
         this.observationInFlight = false;
         this.latestObservation = null;
         this.speechBubble.Clear();
+        this.growth.Reset();
+    }
+
+    private void OnGrowthCommand(string command, string[] args)
+    {
+        if (!Context.IsWorldReady)
+        {
+            this.Monitor.Log("请先进入一个存档。", LogLevel.Info);
+            return;
+        }
+
+        string status = this.growth.GetStatusText();
+        this.Monitor.Log(status, LogLevel.Info);
+        Game1.addHUDMessage(new HUDMessage(status, HUDMessage.newQuest_type));
     }
 }

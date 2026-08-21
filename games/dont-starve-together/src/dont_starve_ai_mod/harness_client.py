@@ -99,6 +99,26 @@ class HarnessClient:
                                 "dst.attack_butterfly",
                                 "dst.collect_butterfly_loot",
                             ],
+                            "atoms": [
+                                {
+                                    "name": "dst.find_nearest_butterfly",
+                                    "description": "在玩家附近寻找最近的活蝴蝶，不移动也不攻击",
+                                    "parameters": '{"radius": 2到25的搜索半径}',
+                                    "returns": '{"targetId": 蝴蝶实体ID, "x": 数字, "z": 数字}',
+                                },
+                                {
+                                    "name": "dst.attack_butterfly",
+                                    "description": "让小汤圆追击指定蝴蝶并攻击一次",
+                                    "parameters": '{"targetId": 来自寻找原子的蝴蝶实体ID}',
+                                    "returns": '{"targetId": 实体ID, "defeated": true, "x": 击杀位置, "z": 击杀位置}',
+                                },
+                                {
+                                    "name": "dst.collect_butterfly_loot",
+                                    "description": "让小汤圆到指定位置附近拾取蝴蝶翅膀或黄油并放入容器",
+                                    "parameters": '{"x": 数字, "z": 数字, "radius": 1到8的搜索半径}',
+                                    "returns": '{"count": 拾取数量, "items": 物品prefab数组}',
+                                },
+                            ],
                             "processId": self._process_id,
                         },
                     }

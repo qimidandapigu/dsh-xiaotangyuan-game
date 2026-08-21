@@ -74,9 +74,11 @@ export function apply(ctx: Context, config: Config = {}): void {
 
 export type { Config } from './config.js'
 export type { FeedbackReceipt, FeedbackReport, FeedbackSubmission } from './runtime/feedback/contracts.js'
-export type { AdapterHello, GameChatContext, GameChatRequest } from './protocol/game.js'
+export type { AdapterHello, GameAtomDefinition, GameChatContext, GameChatRequest } from './protocol/game.js'
 export type { RpcFailure, RpcRequest, RpcSuccess } from './protocol/json-rpc.js'
 export { CapabilityRegistry, REQUIRED_ENGINE_CAPABILITIES, missingRequiredCapabilities } from './runtime/capabilities.js'
+export { normalizeGameContext, renderGameContextForPrompt, XTY_GAME_CONTEXT_SCHEMA } from './runtime/context/game-context.js'
+export type { NormalizedGameContext } from './runtime/context/game-context.js'
 export type { CapabilityProvider, CapabilityStatus, RequiredEngineCapability } from './runtime/capabilities.js'
 export type {
   BinaryAsset,

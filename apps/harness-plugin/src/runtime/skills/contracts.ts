@@ -47,6 +47,17 @@ export interface SkillRunResult {
   error?: string
 }
 
+export interface SkillLearningAttempt {
+  gameId: string
+  skillId: string
+  proposedVersion: number
+  program: SkillProgram
+  success: boolean
+  trace: SkillStepTrace[]
+  error?: string
+  createdAt: string
+}
+
 export type GameAtomExecutor = (
   atom: string,
   args: Record<string, SkillValue>,

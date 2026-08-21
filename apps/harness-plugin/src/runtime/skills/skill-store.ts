@@ -1,33 +1,14 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ResolvedConfig } from '../../config.js'
-import type { SkillRecord } from './contracts.js'
+import type { SkillLearningAttempt, SkillRecord } from './contracts.js'
 import { validateSkillProgram } from './skill-runtime.js'
 
-interface SkillDocument { schemaVersion: 1, skills: SkillRecord[], history: SkillRecord[] }
-
-function butterflySkill(now: string): SkillRecord {
-  return {
-    id: 'dst.hunt-and-collect-butterfly',
-    gameId: 'dont-starve-together',
-    name: '打蝴蝶并捡起掉落',
-    description: '寻找附近最近的蝴蝶，让小汤圆追上并击杀，再把蝴蝶翅膀或黄油捡进自己的容器。',
-    triggers: ['打蝴蝶', '抓蝴蝶', '捡蝴蝶', '蝴蝶翅膀', 'butterfly'],
-    version: 1,
-    status: 'active',
-    program: {
-      language: 'xiaotangyuan-skill-v1',
-      steps: [
-        { op: 'call', atom: 'dst.find_nearest_butterfly', args: { radius: 20 }, saveAs: 'target' },
-        { op: 'call', atom: 'dst.attack_butterfly', args: { targetId: '$target.targetId' }, saveAs: 'attack' },
-        { op: 'call', atom: 'dst.collect_butterfly_loot', args: { x: '$attack.x', z: '$attack.z', radius: 4 }, saveAs: 'loot' },
-      ],
-    },
-    createdAt: now,
-    updatedAt: now,
-    successCount: 0,
-    failureCount: 0,
-  }
+interface SkillDocument {
+  schemaVersion: 1
+  skills: SkillRecord[]
+  history: SkillRecord[]
+  learningAttempts: SkillLearningAttempt[]
 }
 
 export class SkillStore {
@@ -38,17 +19,21 @@ export class SkillStore {
     mkdirSync(config.directory, { recursive: true })
     this.path = join(config.directory, 'skills-v1.json')
     this.document = this.load()
-    this.ensureBuiltins()
+    this.removeLegacyBootstrapSkill()
   }
 
   private load(): SkillDocument {
     try {
       const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as SkillDocument
       if (parsed.schemaVersion === 1 && Array.isArray(parsed.skills)) {
-        return { ...parsed, history: Array.isArray(parsed.history) ? parsed.history : [] }
+        return {
+          ...parsed,
+          history: Array.isArray(parsed.history) ? parsed.history : [],
+          learningAttempts: Array.isArray(parsed.learningAttempts) ? parsed.learningAttempts : [],
+        }
       }
     } catch {}
-    return { schemaVersion: 1, skills: [], history: [] }
+    return { schemaVersion: 1, skills: [], history: [], learningAttempts: [] }
   }
 
   private save(): void {
@@ -57,9 +42,17 @@ export class SkillStore {
     renameSync(temporary, this.path)
   }
 
-  private ensureBuiltins(): void {
-    if (!this.document.skills.some(skill => skill.id === 'dst.hunt-and-collect-butterfly')) {
-      this.document.skills.push(butterflySkill(new Date().toISOString()))
+  private removeLegacyBootstrapSkill(): void {
+    const index = this.document.skills.findIndex(skill =>
+      skill.id === 'dst.hunt-and-collect-butterfly'
+      && skill.gameId === 'dont-starve-together'
+      && skill.version === 1
+      && skill.name === '打蝴蝶并捡起掉落'
+      && !this.document.learningAttempts.some(attempt =>
+        attempt.gameId === skill.gameId && attempt.skillId === skill.id && attempt.success))
+    if (index >= 0) {
+      this.document.history.push({ ...this.document.skills[index], status: 'archived' })
+      this.document.skills.splice(index, 1)
       this.save()
     }
   }
@@ -101,6 +94,12 @@ export class SkillStore {
     skill.successCount += success ? 1 : 0
     skill.failureCount += success ? 0 : 1
     skill.lastError = success ? undefined : error
+    this.save()
+  }
+
+  recordLearningAttempt(attempt: SkillLearningAttempt): void {
+    this.document.learningAttempts.push(attempt)
+    this.document.learningAttempts = this.document.learningAttempts.slice(-100)
     this.save()
   }
 

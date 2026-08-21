@@ -52,7 +52,7 @@ namespace DoubaoAI.ONI.Harness
             {
                 ["adapterId"] = "qimidandapigu.oxygen-not-included-fairy",
                 ["gameId"] = "oxygen-not-included",
-                ["version"] = "0.1.0",
+                ["version"] = "0.6.6",
                 ["protocolVersion"] = "1.1",
                 ["capabilities"] = new JArray("assistant.text-stream"),
                 ["processId"] = Process.GetCurrentProcess().Id,
@@ -159,12 +159,42 @@ namespace DoubaoAI.ONI.Harness
         {
             var actors = new JArray();
             if (command != null) foreach (PlayerCommandActor actor in command.Actors)
-                actors.Add(new JObject { ["id"] = actor.Id, ["name"] = actor.Name, ["cell"] = actor.Cell, ["selected"] = actor.Selected, ["canReachCursor"] = actor.CanReachMouse });
+                actors.Add(new JObject {
+                    ["id"] = actor.Id,
+                    ["kind"] = "character",
+                    ["name"] = actor.Name,
+                    ["selected"] = actor.Selected,
+                    ["position"] = new JObject { ["space"] = "cell", ["cell"] = actor.Cell },
+                    ["reachableFromCursor"] = actor.CanReachMouse
+                });
             return new JObject {
-                ["summary"] = snapshot == null ? string.Empty : snapshot.PromptContext,
-                ["cursor"] = new JObject { ["cell"] = command == null ? Grid.InvalidCell : command.MouseCell, ["element"] = command == null ? "unknown" : command.MouseElement, ["solid"] = command != null && command.MouseCellSolid },
-                ["selectedDuplicantId"] = command == null ? -1 : command.SelectedActorId,
-                ["duplicants"] = actors
+                ["schema"] = "xty.game-context.v1",
+                ["meta"] = new JObject {
+                    ["gameId"] = "oxygen-not-included",
+                    ["adapterId"] = "qimidandapigu.oxygen-not-included-fairy",
+                    ["capturedAt"] = DateTimeOffset.UtcNow.ToString("o"),
+                    ["locale"] = "zh-CN"
+                },
+                ["scene"] = new JObject(),
+                ["player"] = new JObject {
+                    ["id"] = command == null ? -1 : command.SelectedActorId
+                },
+                ["entities"] = actors,
+                ["objectives"] = new JArray(),
+                ["ui"] = new JObject {
+                    ["cursor"] = new JObject {
+                        ["space"] = "cell",
+                        ["cell"] = command == null ? Grid.InvalidCell : command.MouseCell,
+                        ["element"] = command == null ? "unknown" : command.MouseElement,
+                        ["solid"] = command != null && command.MouseCellSolid
+                    }
+                },
+                ["extensions"] = new JObject {
+                    ["oni"] = new JObject {
+                        ["summary"] = snapshot == null ? string.Empty : snapshot.PromptContext,
+                        ["selectedDuplicantId"] = command == null ? -1 : command.SelectedActorId
+                    }
+                }
             };
         }
 
