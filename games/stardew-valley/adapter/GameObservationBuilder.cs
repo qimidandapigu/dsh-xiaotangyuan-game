@@ -9,7 +9,7 @@ namespace StardewAgentMod;
 
 internal static class GameObservationBuilder
 {
-    public static object Capture()
+    public static object Capture(CompanionGrowthSnapshot? companionGrowth = null)
     {
         Farmer player = Game1.player;
         GameLocation location = Game1.currentLocation;
@@ -29,9 +29,11 @@ internal static class GameObservationBuilder
             .Take(8)
             .Select(npc => new
             {
+                id = npc.Name,
+                kind = "npc",
                 name = npc.Name,
-                tile = new { x = (int)npc.Tile.X, y = (int)npc.Tile.Y },
-                hearts = player.friendshipData.TryGetValue(npc.Name, out Friendship? friendship)
+                position = new { space = "tile", x = (int)npc.Tile.X, y = (int)npc.Tile.Y },
+                relationshipLevel = player.friendshipData.TryGetValue(npc.Name, out Friendship? friendship)
                     ? friendship.Points / 250 : 0
             })
             .ToArray();
@@ -42,8 +44,11 @@ internal static class GameObservationBuilder
             .Take(8)
             .Select(monster => new
             {
+                id = monster.Name,
+                kind = "creature",
                 name = monster.Name,
-                health = monster.Health,
+                hostile = true,
+                vitals = new { health = new { current = monster.Health } },
                 distance = Math.Round(Vector2.Distance(monster.Tile, playerTile), 1)
             })
             .ToArray();
@@ -70,50 +75,75 @@ internal static class GameObservationBuilder
 
         return new
         {
-            schema = "xty.stardew.observation.v1",
-            capturedAt = DateTimeOffset.UtcNow,
-            game = new
+            schema = "xty.game-context.v1",
+            meta = new
             {
-                year = Game1.year,
-                season = Game1.currentSeason,
-                day = Game1.dayOfMonth,
-                time = Game1.timeOfDay,
-                weather
+                gameId = "stardew-valley",
+                adapterId = "qimidandapigu.StardewAgent",
+                capturedAt = DateTimeOffset.UtcNow,
+                locale = "zh-CN"
+            },
+            scene = new
+            {
+                location = new
+                {
+                    id = location.NameOrUniqueName,
+                    kind = location.GetType().Name,
+                    outdoors = location.IsOutdoors
+                },
+                clock = new
+                {
+                    year = Game1.year,
+                    season = Game1.currentSeason,
+                    day = Game1.dayOfMonth,
+                    time = Game1.timeOfDay
+                },
+                weather = new { kind = weather }
             },
             player = new
             {
+                id = "local-player",
                 name = player.Name,
-                tile = new { x = (int)playerTile.X, y = (int)playerTile.Y },
-                money = player.Money,
-                stamina = (int)player.Stamina,
-                maxStamina = (int)player.MaxStamina,
-                health = player.health,
-                maxHealth = player.maxHealth,
-                currentItem = player.CurrentItem?.DisplayName,
-                inventoryFreeSlots = player.freeSpotsInInventory(),
-                inventory
+                position = new { space = "tile", x = (int)playerTile.X, y = (int)playerTile.Y },
+                vitals = new
+                {
+                    stamina = new { current = (int)player.Stamina, max = (int)player.MaxStamina, ratio = player.MaxStamina > 0 ? player.Stamina / player.MaxStamina : 0 },
+                    health = new { current = player.health, max = player.maxHealth, ratio = player.maxHealth > 0 ? (double)player.health / player.maxHealth : 0 }
+                },
+                inventory = new
+                {
+                    activeItem = player.CurrentItem?.DisplayName,
+                    freeSlots = player.freeSpotsInInventory(),
+                    items = inventory
+                },
+                currency = new { money = player.Money }
             },
-            location = new
+            companion = new
             {
-                id = location.NameOrUniqueName,
-                type = location.GetType().Name,
-                outdoors = location.IsOutdoors,
-                objects = location.Objects.Count(),
-                nearbyNpcs,
-                monsters
+                id = "xiaotangyuan",
+                present = companionGrowth is not null,
+                growth = companionGrowth
             },
-            farm = new { tilled, dry, crops, ripe },
+            entities = nearbyNpcs.Cast<object>().Concat(monsters).Take(30).ToArray(),
+            objectives = player.questLog
+                .Where(quest => quest is not null && !quest.completed.Value)
+                .Take(8)
+                .Select(quest => new { id = quest.id.Value, title = quest.questTitle })
+                .ToArray(),
             ui = new
             {
                 menuOpen = Game1.activeClickableMenu is not null,
                 eventRunning = Game1.eventUp,
-                playerFree = player.CanMove
+                playerControllable = player.CanMove
             },
-            quests = player.questLog
-                .Where(quest => quest is not null && !quest.completed.Value)
-                .Take(8)
-                .Select(quest => new { id = quest.id.Value, title = quest.questTitle })
-                .ToArray()
+            extensions = new
+            {
+                stardew = new
+                {
+                    farm = new { tilled, dry, crops, ripe },
+                    locationObjectCount = location.Objects.Count()
+                }
+            }
         };
     }
 }

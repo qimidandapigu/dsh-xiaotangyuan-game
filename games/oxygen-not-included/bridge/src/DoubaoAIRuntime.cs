@@ -5,6 +5,7 @@ using DoubaoAI.ONI.Assets;
 using DoubaoAI.ONI.Commands;
 using DoubaoAI.ONI.GameState;
 using DoubaoAI.ONI.Harness;
+using DoubaoAI.ONI.Skills;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 
@@ -37,6 +38,9 @@ namespace DoubaoAI.ONI
         private float _nextFacingSampleAt;
         private float _lastFairyMovementAt;
         private int _facingFrame;
+        private FairyWaterSkillSystem _waterSkill;
+        private float _nextWaterContactScanAt;
+        private int _panelTab;
 
         private void Awake()
         {
@@ -45,6 +49,7 @@ namespace DoubaoAI.ONI
             _bridge = new OniHarnessBridge(config.HarnessBridgeRoot);
             _bridge.Notification += OnHarnessNotification;
             _bridge.ToolExecution += ExecuteHarnessTool;
+            _waterSkill = new FairyWaterSkillSystem();
             string assets = Path.Combine(ModPaths.ContentPath, "assets");
             _sprite = TextureLoader.LoadPng(Path.Combine(assets, "doubao_companion.png"));
             _fallbackSprite = TextureLoader.LoadPng(Path.Combine(assets, "doubao_t.png"));
@@ -76,6 +81,16 @@ namespace DoubaoAI.ONI
                 }
             }
             if (_panelOpen && Input.GetKeyDown(KeyCode.Escape)) _panelOpen = false;
+            if (Time.unscaledTime >= _nextWaterContactScanAt)
+            {
+                _nextWaterContactScanAt = Time.unscaledTime + 0.5f;
+                if (_waterSkill != null && _waterSkill.TryLearnFromContact(ResolveFollowedMinion()))
+                {
+                    _reply = "哇，我碰到水以后学会水团术了！现在可以对我说“吸这里的水”或“向这里喷水”。";
+                    _status = "已觉醒：水团术";
+                    _bubbleUntil = Time.unscaledTime + 12f;
+                }
+            }
         }
 
         private MinionIdentity ResolveFollowedMinion()
@@ -224,6 +239,16 @@ namespace DoubaoAI.ONI
         {
             if (name == "oni_companion_follow")
                 return ChangeFollowedMinion((int?)args["actorId"] ?? -1);
+            if (name == "oni_companion_absorb_water" || name == "oni_companion_spray_water")
+            {
+                PlayerCommandExecutionResult result = name == "oni_companion_absorb_water"
+                    ? _waterSkill.Absorb((int?)args["targetCell"] ?? Grid.InvalidCell, ResolveFollowedMinion())
+                    : _waterSkill.Spray((int?)args["targetCell"] ?? Grid.InvalidCell, ResolveFollowedMinion());
+                _reply = result.Reply;
+                _status = result.Success ? "水团术发动成功" : "水团术没有发动";
+                _bubbleUntil = Time.unscaledTime + 10f;
+                return result;
+            }
 
             var plan = new PlayerCommandPlan
             {
@@ -296,9 +321,18 @@ namespace DoubaoAI.ONI
 
         private void DrawPanel(int id)
         {
-            GUI.Label(new Rect(20, 42, 460, 28), _status, _statusStyle);
-            GUI.Box(new Rect(20, 78, 460, 250), GUIContent.none);
-            GUI.Label(new Rect(34, 92, 432, 222), _reply, _bodyStyle);
+            if (GUI.Button(new Rect(20, 40, 120, 32), "对话", _buttonStyle)) _panelTab = 0;
+            if (GUI.Button(new Rect(150, 40, 120, 32), "技能看板", _buttonStyle)) _panelTab = 1;
+            if (_panelTab == 1)
+            {
+                DrawSkillBoard();
+                GUI.DragWindow(new Rect(0, 0, 500, 36));
+                return;
+            }
+
+            GUI.Label(new Rect(20, 78, 460, 28), _status, _statusStyle);
+            GUI.Box(new Rect(20, 112, 460, 216), GUIContent.none);
+            GUI.Label(new Rect(34, 126, 432, 188), _reply, _bodyStyle);
             _input = GUI.TextArea(new Rect(20, 344, 460, 72), _input, 600, _inputStyle);
             bool send = GUI.Button(new Rect(350, 432, 130, 36), _busy ? "思考中…" : "发送", _buttonStyle);
             if (GUI.Button(new Rect(20, 432, 128, 36), "重载配置", _buttonStyle)) ConfigManager.Load(ModPaths.ContentPath);
@@ -313,9 +347,29 @@ namespace DoubaoAI.ONI
             GUI.DragWindow(new Rect(0, 0, 500, 36));
         }
 
-        private static GameSnapshot SafeCollectSnapshot()
+        private void DrawSkillBoard()
         {
-            try { return GameSnapshotCollector.Collect(); }
+            bool learned = _waterSkill != null && _waterSkill.Learned;
+            GUI.Label(new Rect(20, 84, 460, 30), learned ? "水团术 · 已学会" : "水团术 · 尚未学会", _statusStyle);
+            GUI.Box(new Rect(20, 120, 460, 300), GUIContent.none);
+            string description = learned
+                ? string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "储水囊：{0:0.#}/{1:0} kg\n当前液体：{2}\n\n吸水\n鼠标指向12格内的水，对我说“吸这里的水”。最多保存一格水，真实保留种类、温度和病菌。\n\n喷水\n鼠标指向12格内的空格，对我说“向这里喷水”。每次喷出最多{3:0} kg。",
+                    _waterSkill.StoredMassKg, FairyWaterSkillSystem.CapacityKg,
+                    _waterSkill.StoredElementName, FairyWaterSkillSystem.SprayMassKg)
+                : "学习方式\n让跟随的复制人带着我接触水、污染水、盐水或浓盐水。\n\n第一次真正碰到水后，我会自动觉醒吸水和喷水，不需要技能点。";
+            GUI.Label(new Rect(36, 138, 428, 264), description, _bodyStyle);
+        }
+
+        private GameSnapshot SafeCollectSnapshot()
+        {
+            try
+            {
+                GameSnapshot snapshot = GameSnapshotCollector.Collect();
+                if (_waterSkill != null)
+                    snapshot.PromptContext = (snapshot.PromptContext ?? string.Empty) + _waterSkill.PromptSummary() + "\n";
+                return snapshot;
+            }
             catch (Exception ex) { return new GameSnapshot { PromptContext = "采集结构化游戏信息失败：" + ex.Message }; }
         }
 

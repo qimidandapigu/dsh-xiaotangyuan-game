@@ -82,6 +82,14 @@ describe('game protocol extensions', () => {
     })).toThrow('capabilities')
   })
 
+  it('accepts a typed atom catalog so the model can generate executable skills', () => {
+    const hello = readAdapterHello({
+      adapterId: 'test.adapter', gameId: 'test-game', version: '1.0.0', protocolVersion: '1.1',
+      atoms: [{ name: 'test.find_target', description: 'find target', parameters: '{}', returns: '{"targetId": number}' }],
+    })
+    expect(hello.atoms?.[0].returns).toContain('targetId')
+  })
+
   it('accepts structured state updates', () => {
     expect(readStateUpdate({ observation: { player: { health: 80 } } })).toEqual({
       player: { health: 80 },

@@ -101,13 +101,11 @@ class ModRequestTests(unittest.TestCase):
                 {"action": "start_recording", "state": state, "recipient_userid": "KU_test"}
             )
             app._handle_mod_request({"action": "stop_recording", "state": state})
-            self.assertEqual(
-                gateway.notifications,
-                [
-                    ("state.update", {"observation": state}),
-                    ("state.update", {"observation": state}),
-                ],
-            )
+            self.assertEqual(len(gateway.notifications), 2)
+            for method, payload in gateway.notifications:
+                self.assertEqual(method, "state.update")
+                self.assertEqual(payload["observation"]["schema"], "xty.game-context.v1")
+                self.assertEqual(payload["observation"]["player"]["name"], "Wilson")
             self.assertEqual(
                 gateway.calls,
                 [
@@ -124,7 +122,9 @@ class ModRequestTests(unittest.TestCase):
             app._publish_play_heartbeat()
             method, payload = gateway.notifications[0]
             self.assertEqual(method, "state.update")
-            self.assertEqual(payload["observation"], state)
+            self.assertEqual(payload["observation"]["schema"], "xty.game-context.v1")
+            self.assertEqual(payload["observation"]["player"]["name"], "Wilson")
+            self.assertNotIn("KU_world_session", json.dumps(payload["observation"]))
             self.assertEqual(len(payload["saveId"]), 64)
             self.assertNotIn("KU_world_session", payload["saveId"])
 
@@ -200,6 +200,12 @@ class ModRequestTests(unittest.TestCase):
         self.assertEqual(context["nearbyNpc"], "chester")
         self.assertEqual(len(context["saveId"]), 64)
         self.assertNotIn("KU_world_session", context["saveId"])
+        role_instructions = context["roleInstructions"]
+        self.assertIn("answer directly when you are confident", role_instructions)
+        self.assertIn("never guess", role_instructions)
+        self.assertIn("when a web or search tool is available", role_instructions)
+        self.assertIn("cannot verify the answer right now", role_instructions)
+        self.assertIn("never pretend that you searched", role_instructions)
 
     def test_write_reply_keeps_recipient_and_duration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

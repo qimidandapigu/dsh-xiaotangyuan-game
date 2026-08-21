@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dont-starve-ai-mod"
-version = "0.2.22"
+version = "0.2.23"
 description = "A voice and vision sidecar that lets Chester talk in Don't Starve Together"
 readme = "README.md"
 requires-python = ">=3.11"

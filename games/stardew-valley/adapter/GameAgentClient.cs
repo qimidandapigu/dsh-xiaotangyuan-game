@@ -96,7 +96,7 @@ internal sealed class GameAgentClient : IAsyncDisposable
                 {
                     adapterId = "qimidandapigu.StardewAgent",
                     gameId = "stardew-valley",
-                    version = "0.3.0",
+                    version = "0.6.1",
                     protocolVersion = "1.1",
                     capabilities = new[] { "assistant.text-stream" },
                     processId = Environment.ProcessId,

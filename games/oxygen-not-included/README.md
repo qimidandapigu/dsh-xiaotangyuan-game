@@ -3,6 +3,12 @@
 `bridge/` is the C# Mod loaded by Oxygen Not Included. It owns only game-native work:
 observations, cursor/duplicant identity, native chore execution, and the in-game fairy UI.
 
+The first companion growth loop is implemented in the Bridge: while following a
+Duplicant, XiaoTangYuan learns Water Orb after physically touching water. The
+learned skill can absorb water from the cursor cell or spray the stored water at
+the cursor through natural-language requests. Its skill board is available from
+the fairy panel and shows unlock state, stored element, and mass.
+
 The TypeScript ONI Adapter lives in `adapter/` as its own installable Harness plugin. It
 bridges this Mod to the local AIHarness Gateway and registers ONI-specific tools. The
 generic Harness package does not depend on it, so other players do not download ONI code.
@@ -10,7 +16,7 @@ generic Harness package does not depend on it, so other players do not download 
 AI credentials, screenshot capture, ASR, TTS, memory, and model selection belong to
 AIHarness, not to the Mod. The Bridge contains no direct model or speech client.
 
-Current compatible versions are ONI Adapter `0.1.4`, C# Bridge `0.6.5`, and
+Current compatible versions are ONI Adapter `0.1.5`, C# Bridge `0.6.6`, and
 Harness plugin `0.7.0`. The Harness sends the player text and current game-window
 image to one image-capable Agent. It does not run a separate image-to-text model
 before the conversation model, and it currently omits structured ONI observation
