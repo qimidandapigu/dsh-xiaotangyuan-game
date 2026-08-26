@@ -103,6 +103,19 @@
       padding: 70px 0 96px;
     }
 
+    .migration-notice {
+      width: min(calc(100% - 36px), var(--max));
+      margin: 24px auto 0;
+      padding: 18px 22px;
+      border: 1px solid rgba(244, 199, 104, .42);
+      border-radius: 16px;
+      background: rgba(244, 199, 104, .09);
+      color: var(--muted);
+    }
+
+    .migration-notice strong { color: var(--amber); }
+    .migration-notice a { color: var(--text); font-weight: 720; }
+
     .hero {
       min-height: 580px;
       display: grid;
@@ -698,6 +711,12 @@
   </header>
 
   <main id="top">
+    <aside class="migration-notice" aria-label="项目迁移公告">
+      <strong>本项目已停止独立维护。</strong>
+      源码、文档、后续版本和新功能已经合并到
+      <a href="https://github.com/qimidandapigu/ai-native-game-harness">AI Native Game Harness</a>。
+      本仓库仅作为历史快照，并继续保留既有 Release 下载。
+    </aside>
     <section class="hero reveal" aria-labelledby="hero-title">
       <div>
         <div class="eyebrow">Product doctrine · v2</div>
