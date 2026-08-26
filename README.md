@@ -1,5 +1,8 @@
 # dsh-xiaotangyuan-game
 
+> [!IMPORTANT]
+> **本项目已停止独立维护。** 源码、文档、后续版本和新功能已经合并到 [AI Native Game Harness](https://github.com/qimidandapigu/ai-native-game-harness)。本仓库仅作为历史快照，并继续保留既有 Release 下载；请勿在这里开始新的开发或提交功能改动。
+
 小汤圆游戏 AI 的单仓库。DeepSeek Harness 插件承载通用 Agent、模型、多模态、语音、媒体和安装能力；每个游戏只保留必须调用游戏 API 的薄 Bridge，游戏知识与专属工具放进可选 Adapter。
 
 ```text
