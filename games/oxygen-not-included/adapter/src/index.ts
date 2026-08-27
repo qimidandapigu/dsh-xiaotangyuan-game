@@ -11,7 +11,7 @@ type ObjectValue = Record<string, unknown>
 type BridgeEvent = { id: string, method: string, params: ObjectValue }
 type ToolResult = { success: boolean, reply: string }
 
-const ROLE = '你是住在《缺氧》里的小汤圆，是玩家傲娇、调皮但可靠的伙伴。使用简洁自然中文，不用 Markdown。需要操作游戏时必须调用 oni_ 开头的工具；只有工具返回 success=true 后才能说动作已经执行。玩家明确要求你改为跟随某个复制人时，调用 oni_companion_follow；不要因为普通选择或提到复制人就切换。'
+const ROLE = '你是住在《缺氧》里的小汤圆，是玩家傲娇、调皮但可靠的伙伴。使用简洁自然中文，不用 Markdown。需要操作游戏时必须调用 oni_ 开头的工具；只有工具返回 success=true 后才能说动作已经执行。玩家明确要求你改为跟随某个复制人时，调用 oni_companion_follow；不要因为普通选择或提到复制人就切换。玩家让你吸水、收水或把这里的水吸走时调用 oni_companion_absorb_water；玩家让你喷水、放水或把储水喷到这里时调用 oni_companion_spray_water。水技能是否学会、储水量和种类以当前观察及工具结果为准。'
 
 export const name = 'oni-adapter'
 export const inject = ['tools']
@@ -44,7 +44,8 @@ export class OniAdapter {
 
   async executeTool(name: string, args: ObjectValue, signal: AbortSignal): Promise<ToolResult> {
     if (this.directory === undefined || this.processId === undefined) throw new Error('《缺氧》尚未连接到 AIHarness')
-    const cursor = this.observation?.cursor
+    const ui = typeof this.observation?.ui === 'object' && this.observation.ui !== null ? this.observation.ui as ObjectValue : undefined
+    const cursor = (typeof ui?.cursor === 'object' && ui.cursor !== null ? ui.cursor : this.observation?.cursor)
     const targetCell = typeof cursor === 'object' && cursor !== null && Number.isInteger((cursor as ObjectValue).cell)
       ? (cursor as ObjectValue).cell
       : undefined
@@ -126,7 +127,7 @@ export class OniAdapter {
   private connect(processId: number, saveId: string): void {
     this.disconnect(); this.processId = processId; this.saveId = saveId
     const socket = this.socket = new WebSocket(this.gatewayUrl)
-    socket.on('open', () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: `oni-hello-${processId}`, method: 'adapter.hello', params: { adapterId: 'qimidandapigu.oxygen-not-included-fairy', gameId: 'oxygen-not-included', version: '0.1.4', protocolVersion: '1.1', capabilities: ['assistant.text-stream'], processId, saveId } })))
+    socket.on('open', () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: `oni-hello-${processId}`, method: 'adapter.hello', params: { adapterId: 'qimidandapigu.oxygen-not-included-fairy', gameId: 'oxygen-not-included', version: '0.1.5', protocolVersion: '1.1', capabilities: ['assistant.text-stream'], processId, saveId } })))
     socket.on('error', () => { if (this.socket === socket) this.socket = undefined })
     socket.on('close', () => { if (this.socket === socket) this.socket = undefined })
     socket.on('message', raw => {
@@ -186,6 +187,8 @@ export function registerOniTools(ctx: Context, adapter: OniAdapter): void {
   register('oni_companion_follow', 'Change which living duplicant XiaoTangYuan permanently follows. Call only when the player explicitly asks XiaoTangYuan to follow a different duplicant.', {
     actorId: { type: 'number', required: true, description: 'Exact duplicant id from the current ONI observation.' },
   })
+  register('oni_companion_absorb_water', 'Use XiaoTangYuan\'s learned water skill to absorb water from the current ONI cursor cell. Call when the player explicitly asks to absorb, collect, or remove water here.', {})
+  register('oni_companion_spray_water', 'Use XiaoTangYuan\'s learned water skill to spray stored water into the current ONI cursor cell. Call when the player explicitly asks to spray, release, or place water here.', {})
 }
 
 export function registerOniInstallTools(ctx: Context, installer: OniInstallerConfig): void {

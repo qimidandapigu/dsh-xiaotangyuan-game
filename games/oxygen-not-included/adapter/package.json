@@ -1,6 +1,6 @@
 {
   "name": "@qimidandapigu/oni-adapter",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "Selectable Oxygen Not Included Adapter for DeepSeek Harness.",
   "main": "./dist/index.js",

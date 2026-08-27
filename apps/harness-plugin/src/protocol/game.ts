@@ -6,6 +6,14 @@ export interface AdapterHello {
   processId?: number
   saveId?: string
   capabilities?: string[]
+  atoms?: GameAtomDefinition[]
+}
+
+export interface GameAtomDefinition {
+  name: string
+  description: string
+  parameters: string
+  returns: string
 }
 
 export interface GameChatContext {
@@ -55,6 +63,19 @@ export function readAdapterHello(value: unknown): AdapterHello {
   const capabilities = params.capabilities
   if (capabilities !== undefined && (!Array.isArray(capabilities) || capabilities.some(value => typeof value !== 'string'))) {
     throw new Error('capabilities must be an array of strings when provided')
+  }
+  const atoms = params.atoms
+  if (atoms !== undefined) {
+    if (!Array.isArray(atoms) || atoms.length > 50) throw new Error('atoms must be an array with at most 50 entries')
+    for (const atom of atoms) {
+      const definition = asRecord(atom)
+      for (const key of ['name', 'description', 'parameters', 'returns'] as const) {
+        if (typeof definition[key] !== 'string' || definition[key].trim() === '' || definition[key].length > 500) {
+          throw new Error(`atom ${key} must be a non-empty string with at most 500 characters`)
+        }
+      }
+      if (!/^[a-z0-9][a-z0-9._-]{2,79}$/.test(definition.name as string)) throw new Error('atom name is invalid')
+    }
   }
   const saveId = optionalString(params, 'saveId')
   if (saveId !== undefined && (!/^[a-zA-Z0-9._:-]{1,128}$/.test(saveId))) {

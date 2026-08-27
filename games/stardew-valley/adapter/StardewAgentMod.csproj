@@ -3,7 +3,7 @@
     <TargetFramework>net6.0</TargetFramework>
     <RootNamespace>StardewAgentMod</RootNamespace>
     <AssemblyName>StardewAgentMod</AssemblyName>
-    <Version>0.5.1</Version>
+    <Version>0.6.1</Version>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <EnableModDeploy>false</EnableModDeploy>

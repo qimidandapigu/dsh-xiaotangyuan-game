@@ -60,7 +60,7 @@ Provider 密钥不能进入游戏 Adapter、Bridge 或 `protocol/v1`。两层游
 
 记忆数据库属于小汤圆 Harness 插件的 profile 隔离数据，不进入游戏存档，也不成为 DSH 全局记忆。只有 Adapter 已连接的专属 `GameAgentSession` 会读取它；普通 Harness 对话不注入、不检索，也不承担额外 token 或模型调用。
 
-Adapter 后续只向模型提供经过白名单裁剪的少量 `modelContext`；完整 observation 留在本机用于动作与结果校验。字段、大小、隐私边界、身份键和读写规则见[结构化状态与记忆隔离设计](CONTEXT_AND_MEMORY_DESIGN.md)。
+Adapter 使用统一的 `XTY Game Context v1` 上报状态；Harness 负责校验、旧格式迁移、隐私过滤、数组限长与紧凑提示词渲染。字段和扩展规则见 [XTY Game Context v1](GAME_CONTEXT_V1.md)，记忆边界见[结构化状态与记忆隔离设计](CONTEXT_AND_MEMORY_DESIGN.md)。
 
 ## 单次多模态调用
 
@@ -75,7 +75,7 @@ Adapter 后续只向模型提供经过白名单裁剪的少量 `modelContext`；
 同一个多模态模型直接理解并回答
 ```
 
-当前阶段不把 Adapter 上报的结构化 observation 拼进模型提示词。Adapter 仍可在本地保存精确状态，用于目标格、角色 ID、动作白名单和工具结果校验；这些确定性安全检查不能依赖视觉猜测。如果默认模型不支持图片，Harness 会从已配置 Provider 中选择支持图片输入的模型作为本次游戏 Agent，而不是额外调用第二个模型。
+当前请求会同时携带游戏窗口截图和经过 Harness 限长的 `xty.game-context.v1` JSON。截图负责视觉语义，结构化状态负责血量、背包、坐标、任务等精确事实；动作白名单和结果校验仍必须由游戏 API 完成，不能依赖视觉或模型猜测。如果默认模型不支持图片，Harness 会从已配置 Provider 中选择支持图片输入的模型作为本次游戏 Agent，而不是额外调用第二个模型。
 
 ## 星露谷表现层组件化
 

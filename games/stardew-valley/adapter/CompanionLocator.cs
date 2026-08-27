@@ -11,7 +11,7 @@ namespace StardewAgentMod;
 
 internal sealed class CompanionLocator
 {
-    private const string CompanionItemId = "(TR)qimidandapigu.XiaoTangYuanCompanion_Companion";
+    private const string CompanionItemPrefix = "(TR)qimidandapigu.XiaoTangYuanCompanion_Companion";
     private const string EquipAction = "mushymato.TrinketTinker_EquipHiddenTrinket";
     private const string UnequipAction = "mushymato.TrinketTinker_UnequipHiddenTrinket";
 
@@ -26,7 +26,7 @@ internal sealed class CompanionLocator
         this.monitor = monitor;
     }
 
-    public void ApplyEnabled(bool enabled)
+    public void ApplyEnabled(bool enabled, CompanionForm form = CompanionForm.Seed)
     {
         if (!Context.IsWorldReady || Game1.player is null) return;
         if (!this.helper.ModRegistry.IsLoaded("mushymato.TrinketTinker"))
@@ -35,15 +35,16 @@ internal sealed class CompanionLocator
             return;
         }
 
-        if (enabled)
+        string desiredItemId = GetItemId(form);
+        foreach (string itemId in GetAllItemIds())
         {
-            if (!this.IsEquipped())
-                this.RunAction($"{EquipAction} {CompanionItemId} 0 0 -1 false");
-            return;
+            if (enabled && itemId == desiredItemId) continue;
+            for (int attempt = 0; attempt < 8 && this.IsEquipped(itemId); attempt++)
+                this.RunAction($"{UnequipAction} {itemId}");
         }
 
-        for (int attempt = 0; attempt < 8 && this.IsEquipped(); attempt++)
-            this.RunAction($"{UnequipAction} {CompanionItemId}");
+        if (enabled && !this.IsEquipped(desiredItemId))
+            this.RunAction($"{EquipAction} {desiredItemId} 0 0 -1 false");
     }
 
     public Vector2? TryGetWorldPosition()
@@ -52,7 +53,7 @@ internal sealed class CompanionLocator
         {
             foreach (Trinket? trinket in Game1.player?.trinketItems ?? [])
             {
-                if (trinket?.QualifiedItemId != CompanionItemId) continue;
+                if (trinket is null || !IsCompanionItem(trinket.QualifiedItemId)) continue;
                 object? effect = trinket.GetEffect();
                 if (effect is null) continue;
                 if (this.effectType != effect.GetType())
@@ -71,15 +72,40 @@ internal sealed class CompanionLocator
         }
     }
 
-    private bool IsEquipped()
+    private bool IsEquipped(string itemId)
     {
         if (Game1.player?.trinketItems is null) return false;
         foreach (Trinket? trinket in Game1.player.trinketItems)
         {
-            if (trinket?.QualifiedItemId == CompanionItemId) return true;
+            if (trinket?.QualifiedItemId == itemId) return true;
         }
         return false;
     }
+
+    private static bool IsCompanionItem(string itemId)
+    {
+        foreach (string candidate in GetAllItemIds())
+        {
+            if (itemId == candidate) return true;
+        }
+        return false;
+    }
+
+    private static string GetItemId(CompanionForm form) => form switch
+    {
+        CompanionForm.Combat => CompanionItemPrefix + "_Combat",
+        CompanionForm.Farming => CompanionItemPrefix + "_Farming",
+        CompanionForm.Fishing => CompanionItemPrefix + "_Fishing",
+        _ => CompanionItemPrefix
+    };
+
+    private static string[] GetAllItemIds() =>
+    [
+        CompanionItemPrefix,
+        CompanionItemPrefix + "_Combat",
+        CompanionItemPrefix + "_Farming",
+        CompanionItemPrefix + "_Fishing"
+    ];
 
     private void RunAction(string actionText)
     {

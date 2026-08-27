@@ -1,4 +1,4 @@
-description: XiaoTangYuan ONI core agent regression
+description: XiaoTangYuan core game-agent regression
 
 prompts:
   - '{{playerText}}'

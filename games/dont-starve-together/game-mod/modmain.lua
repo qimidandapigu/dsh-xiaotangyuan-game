@@ -966,9 +966,6 @@ local function nearby_snapshot(x, y, z)
     end
 
     for _, entity in pairs(entities) do
-        if #nearby >= 30 then
-            break
-        end
         if entity ~= nil and entity.prefab ~= nil and entity.Transform ~= nil then
             local ex, _, ez = entity.Transform:GetWorldPosition()
             local dx = ex - x
@@ -982,6 +979,9 @@ local function nearby_snapshot(x, y, z)
     table.sort(nearby, function(a, b)
         return a.distance < b.distance
     end)
+    while #nearby > 30 do
+        table.remove(nearby)
+    end
     return nearby
 end
 

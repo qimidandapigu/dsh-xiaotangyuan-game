@@ -10,7 +10,7 @@ export class SkillService {
     this.store = store
   }
 
-  saveGenerated(input: {
+  private saveGenerated(input: {
     gameId: string
     skillId: string
     name: string
@@ -36,6 +36,41 @@ export class SkillService {
       failureCount: previous?.failureCount ?? 0,
       ...(previous?.lastUsedAt === undefined ? {} : { lastUsedAt: previous.lastUsedAt }),
     })
+  }
+
+  async tryLearn(input: {
+    gameId: string
+    skillId: string
+    name: string
+    description: string
+    triggers: string[]
+    program: SkillProgram
+  }, allowedAtoms: ReadonlySet<string>, executor: GameAtomExecutor, signal: AbortSignal): Promise<{
+    result: SkillRunResult
+    learned?: SkillRecord
+  }> {
+    validateSkillProgram(input.program, allowedAtoms)
+    const proposedVersion = (this.store.find(input.gameId, input.skillId)?.version ?? 0) + 1
+    const result = await this.runtime.run(
+      input.skillId,
+      proposedVersion,
+      input.program,
+      allowedAtoms,
+      executor,
+      signal,
+    )
+    this.store.recordLearningAttempt({
+      gameId: input.gameId,
+      skillId: input.skillId,
+      proposedVersion,
+      program: input.program,
+      success: result.success,
+      trace: result.trace,
+      ...(result.error === undefined ? {} : { error: result.error }),
+      createdAt: new Date().toISOString(),
+    })
+    if (!result.success) return { result }
+    return { result, learned: this.saveGenerated(input, allowedAtoms) }
   }
 
   async run(

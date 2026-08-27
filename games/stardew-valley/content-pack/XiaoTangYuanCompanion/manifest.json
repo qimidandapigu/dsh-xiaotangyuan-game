@@ -1,8 +1,8 @@
 {
   "Name": "XiaoTangYuan Companion",
   "Author": "qimidandapigu",
-  "Version": "0.5.0",
-  "Description": "小汤圆游戏 AI 的星露谷同伴外观与 TrinketTinker 配置。",
+  "Version": "0.6.0",
+  "Description": "小汤圆游戏 AI 的星露谷同伴外观与三分支进化形态。",
   "UniqueID": "qimidandapigu.XiaoTangYuanCompanion",
   "ContentPackFor": {
     "UniqueID": "Pathoschild.ContentPatcher",
